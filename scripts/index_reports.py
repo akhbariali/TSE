@@ -16,7 +16,7 @@ from analyze_reports import analyze
 from download_reports import ROOT, atomic_json, read_json
 
 DB = ROOT / 'data/archive.sqlite3'
-PARSER_VERSION = 3
+PARSER_VERSION = 4
 
 
 def connect(path=DB):

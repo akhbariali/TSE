@@ -8,60 +8,10 @@ from decimal import Decimal
 import json
 from pathlib import Path
 import re
-import xml.etree.ElementTree as ET
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-NS = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
-REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-
-
-def workbook(path):
-    with zipfile.ZipFile(path) as archive:
-        strings = []
-        if 'xl/sharedStrings.xml' in archive.namelist():
-            strings = [''.join(t.text or '' for t in x.findall('.//m:t', NS))
-                       for x in ET.fromstring(archive.read('xl/sharedStrings.xml')).findall('m:si', NS)]
-        relationships = {r.get('Id'): r.get('Target') for r in
-                         ET.fromstring(archive.read('xl/_rels/workbook.xml.rels'))}
-        result = {}
-        for sheet in ET.fromstring(archive.read('xl/workbook.xml')).find('m:sheets', NS):
-            # Hidden sheets repeat the visible report and can contain very large
-            # formatting ranges. Read only the three source tables we use.
-            if sheet.get('name') not in ('خلاصه بازار', 'تغییر مالکیت براساس حجم', 'تغییر مالکیت براساس ارزش'):
-                continue
-            target = relationships[sheet.get(f'{{{REL}}}id')]
-            target = target.lstrip('/') if target.startswith('/') else 'xl/' + target
-            rows = {}
-            stream = archive.open(target)
-            for event, row in ET.iterparse(stream, events=('end',)):
-                if row.tag != '{' + NS['m'] + '}row':
-                    continue
-                values = {}
-                for cell in row:
-                    value = cell.find('m:v', NS)
-                    if cell.get('t') == 'inlineStr':
-                        value_text = ''.join(t.text or '' for t in cell.findall('.//m:t', NS))
-                    elif value is not None:
-                        value_text = strings[int(value.text)] if cell.get('t') == 's' else value.text
-                    else:
-                        continue
-                    values[re.sub(r'\d', '', cell.get('r'))] = value_text
-                if values:
-                    rows[int(row.get('r'))] = values
-                row.clear()
-            stream.close()
-            result[sheet.get('name')] = rows
-        return result
-
-
-def numeric(row, col):
-    return Decimal(row.get(col, '0'))
-
-
-def table(rows):
-    return {row['B']: row for row in rows.values()
-            if row.get('A', '').isdigit() and row.get('B') and row.get('C')}
+from workbook_layout import (read_workbook as workbook, daily_sheets, normalized,
+                             decimal_value, measure, role, action, col_number)
 
 
 def report_date(summary, path):
@@ -80,26 +30,42 @@ def report_date(summary, path):
 
 
 def summary_values(summary):
-    # A few versions add four rows above the same summary. Locate the labels,
-    # rather than silently reading a heading or a numeric chart helper cell.
-    total = None
-    buy_share = sell_share = None
-    for index, row in summary.items():
-        if 'حجم' in row.get('D', '') and 'معاملات' in row.get('D', '') and 'ارزش' in row.get('F', ''):
-            total = summary.get(index + 1)
-        label = row.get('F', '')
-        if 'سهام' in label:
-            try:
-                share = numeric(row, 'I')
-                if 'خریداری' in label or 'خريداري' in label:
-                    buy_share = share
-                if 'فروخته' in label:
-                    sell_share = share
-            except Exception:
-                pass
-    if total is None:
-        raise ValueError('Summary trading-value/volume total could not be located')
-    return numeric(total, 'D'), numeric(total, 'F'), buy_share, sell_share
+    totals = {}
+    shares = {}
+    for index, row in sorted(summary.items()):
+        for col, label in row.items():
+            text = normalized(label)
+            kind = measure(label)
+            if kind and ('معاملات' in text or 'total' in text) and not ('درصد' in text or '%' in text):
+                following = summary.get(index + 1, {}).get(col)
+                if following is not None:
+                    try:
+                        number = decimal_value(following, f'summary!{col}{index+1}')
+                    except ValueError:
+                        continue
+                    if kind in totals and totals[kind] != number:
+                        raise ValueError(f'Ambiguous summary {kind} totals')
+                    totals[kind] = number
+            if 'سهام' in text and action(label):
+                # Summary percentages describe a narrower instrument scope.
+                # Match the value group and explicit retail heading above it.
+                header_candidates = [r for n,r in sorted(summary.items()) if index-5 <= n < index
+                                     and any(role(t) for t in r.values())
+                                     and any(measure(t) for t in r.values())]
+                headers = header_candidates[-1] if header_candidates else {}
+                groups = [c for c,t in headers.items() if measure(t)]
+                for c, heading in headers.items():
+                    if role(heading) != 'retail' or col_number(c) <= col_number(col):
+                        continue
+                    preceding = [g for g in groups if col_number(g)<=col_number(c)]
+                    if preceding and measure(headers[max(preceding,key=col_number)]) == 'value':
+                        try:
+                            shares[action(label)] = decimal_value(row.get(c), f'summary!{c}{index}')
+                        except ValueError:
+                            pass
+    if set(totals) != {'volume','value'}:
+        raise ValueError('Summary trading-value/volume total could not be located by labels')
+    return totals['volume'], totals['value'], shares.get('buy'), shares.get('sell')
 
 
 def write_csv(path, records):
@@ -112,27 +78,25 @@ def write_csv(path, records):
 
 
 def analyze(path):
-    sheets = workbook(path)
-    summary = sheets['خلاصه بازار']
+    summary, vol_table, val_table = daily_sheets(workbook(path))
     date = report_date(summary, path)
     source_volume, source_turnover, buy_share, sell_share = summary_values(summary)
-    vol_rows = sheets['تغییر مالکیت براساس حجم']
-    val_rows = sheets['تغییر مالکیت براساس ارزش']
-    volume, value = table(vol_rows), table(val_rows)
+    volume, value = vol_table.rows, val_table.rows
     records = []
-    issues = []
+    issues = [*vol_table.issues, *val_table.issues]
     if set(volume) != set(value):
-        issues.append('Volume/value symbol sets differ')
+        issues.append(f'Volume/value symbol sets differ: {len(set(volume)-set(value))} only in volume, {len(set(value)-set(volume))} only in value')
+    keys = ('retail_buy','institutional_buy','retail_sell','institutional_sell')
     for symbol, row in value.items():
         v = volume.get(symbol)
         if v is None:
             continue
-        rb, ib, rs, ins = (numeric(row, c) for c in ['D', 'E', 'H', 'I'])
-        rbv, ibv, rsv, inv = (numeric(v, c) for c in ['D', 'E', 'H', 'I'])
+        rb, ib, rs, ins = (row[k] for k in keys)
+        rbv, ibv, rsv, inv = (v[k] for k in keys)
         turnover, quantity = rb + ib, rbv + ibv
         if abs(turnover - rs - ins) > 1 or quantity != rsv + inv:
             issues.append(f'Buy/sell mismatch: {symbol}')
-        records.append({'date': date, 'symbol': symbol, 'company': row['C'],
+        records.append({'date': date, 'symbol': symbol, 'company': row['company'] or v['company'],
                         'retail_buy_rial': rb, 'institutional_buy_rial': ib,
                         'retail_sell_rial': rs, 'institutional_sell_rial': ins,
                         'turnover_rial': turnover, 'volume': quantity,
@@ -145,6 +109,14 @@ def analyze(path):
                         'retail_sell_vwap_rial': rs/rsv if rsv else '',
                         'institutional_buy_vwap_rial': ib/ibv if ibv else '',
                         'institutional_sell_vwap_rial': ins/inv if inv else ''})
+    for table in (vol_table, val_table):
+        if table.totals:
+            for key in keys:
+                actual = sum(r[key] for r in table.rows.values())
+                expected = table.totals[key]
+                tolerance = max(Decimal(1), abs(expected)*Decimal('1e-14')) if table.kind=='value' else Decimal(0)
+                if abs(actual-expected) > tolerance:
+                    issues.append(f'{table.name}: {key} footer mismatch: {actual} vs {expected}')
     total = sum(r['turnover_rial'] for r in records)
     net = sum(r['retail_net_rial'] for r in records)
     # Excel cached totals have ~15 significant digits. Allow only the tiny
@@ -166,6 +138,8 @@ def analyze(path):
              'retail_net_positive_symbols': positive, 'retail_net_negative_symbols': negative,
              'retail_net_zero_symbols': len(records)-positive-negative,
              'top10_turnover_share': sum(r['turnover_rial'] for r in ordered[:10])/total if total else None,
+             'normalizations': [*vol_table.notes, *val_table.notes],
+             'layouts': [vol_table.describe(), val_table.describe()],
              'validation_issues': len(issues)}
     return daily, records, issues
 
@@ -178,8 +152,9 @@ def main():
     for path in paths:
         try:
             day, records, issues = analyze(path)
-            days.append(day)
-            all_records.extend(records)
+            if not issues:
+                days.append(day)
+                all_records.extend(records)
             checks.append({'file': path.name, 'issues': issues})
         except Exception as error:
             checks.append({'file': path.name, 'error': str(error)})

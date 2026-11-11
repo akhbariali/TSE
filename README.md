@@ -9,7 +9,7 @@ cd /path/to/TSE
 python3 app.py --port 8000
 ```
 
-Open **http://127.0.0.1:8000**. The existing downloaded files and database are ready to use. The server starts a lightweight background indexer that notices new downloads; it does not automatically start a network download. The UI has no external font, chart-library, or CDN dependency.
+Open **http://127.0.0.1:8000**. Downloaded workbooks and the database are local, ignored files. On a fresh clone, run the download and indexing commands below to populate the archive. The server starts a lightweight background indexer that notices new downloads; it does not automatically start a network download. The UI has no external font, chart-library, or CDN dependency.
 
 To listen on another interface, use `--host 0.0.0.0`. Access remains unauthenticated, including the archive-refresh action. Run it on the intended network. Deployment behind a reverse proxy is possible; this repository does not provision hosting.
 
@@ -49,9 +49,13 @@ The interface currently uses English, with Persian source labels/symbols retaine
 
 ## Data quality and interpretation
 
-After historical-layout/date normalization, **345 workbooks pass the accounting checks; 443 have warnings; 6 are not fully supported**. Warning/unsupported files stay downloadable and searchable, but do not enter chart aggregates. Historical examples include mismatched value/volume symbol sets, source totals that do not reconcile with detailed rows, and monthly report layouts outside the daily parser. Review the exact issue in the library before relying on a file.
+After header-based layout normalization, **351 workbooks pass the accounting checks; 441 have warnings; 2 are not daily ownership reports** (794 unique files audited on 11 November 2026). Warning/unsupported files stay downloadable and searchable, but do not enter chart aggregates. Historical examples include mismatched value/volume symbol sets, source totals that do not reconcile with detailed rows, and monthly report layouts outside the daily parser. Review the exact issue in the library before relying on a file.
 
-Dates are normalized from compact, slash-separated, dash-separated, and Persian-digit formats. Shifted daily summary rows are located by labels. Very small total discrepancies consistent with Excel's approximately 15-digit cached numeric precision are tolerated (maximum of 1 rial and `abs(source_total) × 10^-14`); material differences remain warnings. Missing summary percentages remain null and are not fabricated.
+Columns are detected from actual symbol, buy/sell, investor-role, and volume/value headings, including Persian/Arabic letter variants and English aliases. Reordered columns, institutional-first reports, shifted headers, renamed worksheets, and merged heading groups are supported. A missing investor subheading is recovered only when an explicit, unambiguous percentage-header pair corroborates its identity; percentages never substitute for trading amounts. Missing required metrics or conflicting headings produce actionable errors. Missing company names are allowed; missing or invalid numeric cells are never assumed to be zero.
+
+The first labeled total ends the instrument table, even when it has a numeric row index or is labeled in the index column. Subsequent pasted/template rows are excluded. Duplicate symbols are flagged without overwriting the first row. Every parsed investor subtotal is checked against its footer when available, then the combined rows are reconciled against the summary. Original Excel files are never rewritten. Expand **Layout & validation details** in the report library to inspect the column mapping, adjustments, and complete issue list.
+
+Dates are normalized from compact, slash-separated, dash-separated, and Persian-digit formats. Shifted summary rows and moved total columns are located by labels. Very small total discrepancies consistent with Excel's approximately 15-digit cached numeric precision are tolerated (maximum of 1 rial and `abs(source_total) × 10^-14`); material differences remain warnings. Missing summary percentages remain null and are not fabricated.
 
 One validated revision per report date enters analytics; alternate revisions remain in the library. Hidden duplicate sheets are excluded. Exact symbol suffixes and names are not merged, and missing observations are not assumed to be zero. Database chart values use floating-point numbers after Decimal-based source checks; original workbooks retain the full stored precision.
 
@@ -65,6 +69,8 @@ web/static/                    HTML, CSS, JavaScript (no build step)
 scripts/download_reports.py    Resumable whole-archive downloader
 scripts/index_reports.py       Incremental SQLite ingestion
 scripts/analyze_reports.py     Decimal-based workbook extraction/checks
+scripts/workbook_layout.py     Header detection and safe table normalization
+scripts/audit_reports.py       Indexed validation/layout audit (JSON)
 scripts/sync_archive.py         Download + index orchestration
 data/raw/                      Original Excel files
 data/download-manifest.json    Attachment IDs, source URLs, file paths, SHA-256
@@ -86,7 +92,12 @@ To back up the database while the app runs, use SQLite's backup API rather than 
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m py_compile app.py scripts/*.py
+python3 scripts/audit_reports.py
 node --check web/static/app.js
 ```
 
 The regression suite covers multipage discovery, duplicate attachments/content, filename revisions, preserving previous downloads on a limited run, retrying failures, repairing damaged files, historical date formats/shifted summaries, known sample figures, and consistent date filtering/search/export queries. Browser checks cover desktop/mobile layout, report pagination, symbol search/history, all chart modes, custom/empty dates, filtered downloads, and server-error handling.
+
+## Version control
+
+The original app is preserved on `main` (commit `9629a31`). The parser corrections are on `fix/resilient-workbook-layouts`. All Excel formats, downloaded data/manifests, SQLite databases, generated reports, logs, and local environments are excluded by `.gitignore`. A fresh clone recreates local data with the downloader and indexer. See [PARSER_AUDIT.md](PARSER_AUDIT.md) for the complete archive audit and remaining limitations.

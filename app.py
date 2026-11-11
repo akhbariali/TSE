@@ -169,10 +169,14 @@ def reports(db, query):
         clause += ' AND state=?'
         params.append(query['state'])
     total = db.execute('SELECT COUNT(*) FROM workbooks WHERE '+clause, params).fetchone()[0]
-    items = rows(db, '''SELECT sha,source_name,title,date,effective_date,published_at,state,error,issues,bytes,
+    items = rows(db, '''SELECT sha,source_name,title,date,effective_date,published_at,state,error,issues,bytes,daily,
                  detail_url,report_id,EXISTS(SELECT 1 FROM active_reports a WHERE a.sha=workbooks.sha) AS active
                  FROM workbooks WHERE '''+clause+' ORDER BY effective_date DESC,published_at DESC LIMIT ? OFFSET ?',
                  [*params, size, (page-1)*size])
+    for item in items:
+        daily = json.loads(item.pop('daily') or '{}')
+        item['normalizations'] = daily.get('normalizations', [])
+        item['layouts'] = daily.get('layouts', [])
     return {'items': items, 'total': total, 'page': page, 'size': size}
 
 
@@ -236,6 +240,7 @@ class Handler(BaseHTTPRequestHandler):
                     result = symbol_detail(db, query)
                 elif route in ('/api/export/flows', '/api/export/daily'):
                     result = flow_query(db, query, export=True)['items'] if route.endswith('flows') else overview(db, query)['days']
+                    result = [{k:v for k,v in record.items() if k not in ('normalizations','layouts')} for record in result]
                     output = io.StringIO()
                     output.write('\ufeff')
                     if result:

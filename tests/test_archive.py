@@ -118,7 +118,7 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(summary_values(rows),(Decimal(12),Decimal(120),None,None))
 
     def test_known_workbook_reconciles_with_verified_figures(self):
-        source=ROOT/'KH - 14050819.xlsx'
+        source=ROOT/'data/raw/KH - 14050819.xlsx'
         if not source.exists():self.skipTest('Source fixture is not available')
         day,records,issues=analyze(source)
         self.assertEqual(day['date'],'1405/08/19')
