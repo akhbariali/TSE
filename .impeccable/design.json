@@ -1,0 +1,373 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-11T08:21:53.582089+00:00",
+  "title": "Design System: TSE Market Archive",
+  "extensions": {
+    "colorMeta": {
+      "blue": {
+        "role": "primary",
+        "displayName": "Atlas cobalt",
+        "tonalRamp": [
+          "oklch(15% 0.042 265)",
+          "oklch(27% 0.078 265)",
+          "oklch(39% 0.102 265)",
+          "oklch(51% 0.12 265)",
+          "oklch(63% 0.12 265)",
+          "oklch(75% 0.096 265)",
+          "oklch(87% 0.048 265)",
+          "oklch(95% 0.018 265)"
+        ]
+      },
+      "blue-dark": {
+        "role": "primary",
+        "displayName": "Deep cobalt",
+        "tonalRamp": [
+          "oklch(15% 0.042 265)",
+          "oklch(27% 0.078 265)",
+          "oklch(39% 0.102 265)",
+          "oklch(51% 0.12 265)",
+          "oklch(63% 0.12 265)",
+          "oklch(75% 0.096 265)",
+          "oklch(87% 0.048 265)",
+          "oklch(95% 0.018 265)"
+        ]
+      },
+      "blue-soft": {
+        "role": "primary",
+        "displayName": "Pale cobalt",
+        "tonalRamp": [
+          "oklch(15% 0.0052 265)",
+          "oklch(27% 0.0097 265)",
+          "oklch(39% 0.0127 265)",
+          "oklch(51% 0.015 265)",
+          "oklch(63% 0.015 265)",
+          "oklch(75% 0.012 265)",
+          "oklch(87% 0.006 265)",
+          "oklch(95% 0.0022 265)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Deep ink",
+        "tonalRamp": [
+          "oklch(15% 0.0052 260)",
+          "oklch(27% 0.0097 260)",
+          "oklch(39% 0.0127 260)",
+          "oklch(51% 0.015 260)",
+          "oklch(63% 0.015 260)",
+          "oklch(75% 0.012 260)",
+          "oklch(87% 0.006 260)",
+          "oklch(95% 0.0022 260)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Slate",
+        "tonalRamp": [
+          "oklch(15% 0.0052 255)",
+          "oklch(27% 0.0097 255)",
+          "oklch(39% 0.0127 255)",
+          "oklch(51% 0.015 255)",
+          "oklch(63% 0.015 255)",
+          "oklch(75% 0.012 255)",
+          "oklch(87% 0.006 255)",
+          "oklch(95% 0.0022 255)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Cool rule",
+        "tonalRamp": [
+          "oklch(15% 0.0052 255)",
+          "oklch(27% 0.0097 255)",
+          "oklch(39% 0.0127 255)",
+          "oklch(51% 0.015 255)",
+          "oklch(63% 0.015 255)",
+          "oklch(75% 0.012 255)",
+          "oklch(87% 0.006 255)",
+          "oklch(95% 0.0022 255)"
+        ]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Workspace mist",
+        "tonalRamp": [
+          "oklch(15% 0.0052 255)",
+          "oklch(27% 0.0097 255)",
+          "oklch(39% 0.0127 255)",
+          "oklch(51% 0.015 255)",
+          "oklch(63% 0.015 255)",
+          "oklch(75% 0.012 255)",
+          "oklch(87% 0.006 255)",
+          "oklch(95% 0.0022 255)"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "White paper",
+        "tonalRamp": [
+          "oklch(15% 0.0052 255)",
+          "oklch(27% 0.0097 255)",
+          "oklch(39% 0.0127 255)",
+          "oklch(51% 0.015 255)",
+          "oklch(63% 0.015 255)",
+          "oklch(75% 0.012 255)",
+          "oklch(87% 0.006 255)",
+          "oklch(95% 0.0022 255)"
+        ]
+      },
+      "positive": {
+        "role": "secondary",
+        "displayName": "Transfer teal",
+        "tonalRamp": [
+          "oklch(15% 0.042 170)",
+          "oklch(27% 0.078 170)",
+          "oklch(39% 0.102 170)",
+          "oklch(51% 0.12 170)",
+          "oklch(63% 0.12 170)",
+          "oklch(75% 0.096 170)",
+          "oklch(87% 0.048 170)",
+          "oklch(95% 0.018 170)"
+        ]
+      },
+      "positive-soft": {
+        "role": "secondary",
+        "displayName": "Teal wash",
+        "tonalRamp": [
+          "oklch(15% 0.0052 170)",
+          "oklch(27% 0.0097 170)",
+          "oklch(39% 0.0127 170)",
+          "oklch(51% 0.015 170)",
+          "oklch(63% 0.015 170)",
+          "oklch(75% 0.012 170)",
+          "oklch(87% 0.006 170)",
+          "oklch(95% 0.0022 170)"
+        ]
+      },
+      "negative": {
+        "role": "secondary",
+        "displayName": "Transfer brick",
+        "tonalRamp": [
+          "oklch(15% 0.042 30)",
+          "oklch(27% 0.078 30)",
+          "oklch(39% 0.102 30)",
+          "oklch(51% 0.12 30)",
+          "oklch(63% 0.12 30)",
+          "oklch(75% 0.096 30)",
+          "oklch(87% 0.048 30)",
+          "oklch(95% 0.018 30)"
+        ]
+      },
+      "negative-soft": {
+        "role": "secondary",
+        "displayName": "Brick wash",
+        "tonalRamp": [
+          "oklch(15% 0.0052 30)",
+          "oklch(27% 0.0097 30)",
+          "oklch(39% 0.0127 30)",
+          "oklch(51% 0.015 30)",
+          "oklch(63% 0.015 30)",
+          "oklch(75% 0.012 30)",
+          "oklch(87% 0.006 30)",
+          "oklch(95% 0.0022 30)"
+        ]
+      },
+      "amber": {
+        "role": "secondary",
+        "displayName": "Archive amber",
+        "tonalRamp": [
+          "oklch(15% 0.042 80)",
+          "oklch(27% 0.078 80)",
+          "oklch(39% 0.102 80)",
+          "oklch(51% 0.12 80)",
+          "oklch(63% 0.12 80)",
+          "oklch(75% 0.096 80)",
+          "oklch(87% 0.048 80)",
+          "oklch(95% 0.018 80)"
+        ]
+      },
+      "amber-soft": {
+        "role": "secondary",
+        "displayName": "Amber wash",
+        "tonalRamp": [
+          "oklch(15% 0.0052 80)",
+          "oklch(27% 0.0097 80)",
+          "oklch(39% 0.0127 80)",
+          "oklch(51% 0.015 80)",
+          "oklch(63% 0.015 80)",
+          "oklch(75% 0.012 80)",
+          "oklch(87% 0.006 80)",
+          "oklch(95% 0.0022 80)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Page headline",
+        "purpose": "Route titles."
+      },
+      "title": {
+        "displayName": "Section title",
+        "purpose": "Panel and methodology section headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Global base text; denser contexts use smaller roles."
+      },
+      "table": {
+        "displayName": "Data text",
+        "purpose": "Compact aligned tables and control text."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels and table headings."
+      }
+    },
+    "shadows": [
+      {
+        "name": "chart-tooltip",
+        "value": "0 5px 16px #202c4322",
+        "purpose": "Transient chart inspection tooltip."
+      },
+      {
+        "name": "toast",
+        "value": "0 8px 28px #202c4329",
+        "purpose": "Transient status feedback."
+      }
+    ],
+    "motion": [
+      {
+        "name": "navigation",
+        "value": "background-color 140ms ease-out",
+        "purpose": "Navigation hover under no-preference motion setting."
+      },
+      {
+        "name": "breadth",
+        "value": "width 280ms cubic-bezier(.16,1,.3,1)",
+        "purpose": "Breadth changes under no-preference motion setting."
+      },
+      {
+        "name": "notice",
+        "value": "notice-in 250ms cubic-bezier(.16,1,.3,1)",
+        "purpose": "Clip-path reveal from inset(0 0 100% 0) to inset(0), under no-preference motion setting."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide",
+        "value": "1650px"
+      },
+      {
+        "name": "compact-desktop",
+        "value": "1200px"
+      },
+      {
+        "name": "horizontal-navigation",
+        "value": "900px"
+      },
+      {
+        "name": "mobile",
+        "value": "650px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary archive or filter action.",
+      "html": "<button class=\"ds-button\">Update entire archive</button>",
+      "css": ".ds-button{font-family:Arial,\"Noto Sans Arabic\",Tahoma,sans-serif;line-height:1.5;display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:1px solid transparent;border-radius:6px;padding:8px 14px;font-weight:600;font-size:12px;cursor:pointer;background:var(--blue,#2248a5);color:var(--paper,#fff)}.ds-button:hover{background:var(--blue-dark,#183780)}.ds-button:focus-visible{outline:3px solid #7198f1;outline-offset:3px}.ds-button:disabled{opacity:.5;cursor:default}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Exports, source files, and secondary actions.",
+      "html": "<button class=\"ds-button ds-secondary\">Export CSV</button>",
+      "css": ".ds-button{font-family:Arial,\"Noto Sans Arabic\",Tahoma,sans-serif;line-height:1.5;display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:1px solid transparent;border-radius:6px;padding:8px 14px;font-weight:600;font-size:12px;cursor:pointer;background:var(--blue,#2248a5);color:var(--paper,#fff)}.ds-button:hover{background:var(--blue-dark,#183780)}.ds-button:focus-visible{outline:3px solid #7198f1;outline-offset:3px}.ds-button:disabled{opacity:.5;cursor:default}.ds-secondary{background:var(--paper,#fff);border-color:var(--line,#dce3ee);color:var(--ink,#202c43)}.ds-secondary:hover{background:var(--blue-soft,#edf2ff);border-color:#acbfe5}"
+    },
+    {
+      "name": "Link action",
+      "kind": "button",
+      "refersTo": "button-link",
+      "description": "A quiet textual action within a work area.",
+      "html": "<button class=\"ds-button ds-link\">Review all files</button>",
+      "css": ".ds-button{font-family:Arial,\"Noto Sans Arabic\",Tahoma,sans-serif;line-height:1.5;display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:1px solid transparent;border-radius:6px;padding:8px 14px;font-weight:600;font-size:12px;cursor:pointer;background:var(--blue,#2248a5);color:var(--paper,#fff)}.ds-button:hover{background:var(--blue-dark,#183780)}.ds-button:focus-visible{outline:3px solid #7198f1;outline-offset:3px}.ds-button:disabled{opacity:.5;cursor:default}.ds-link{background:none;border:none;color:var(--blue,#2248a5);padding-left:0;padding-right:0;min-height:30px}.ds-link:hover{background:none;text-decoration:underline}"
+    },
+    {
+      "name": "Search field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labeled report or symbol search.",
+      "html": "<label class=\"ds-field\">Symbol or instrument name<input placeholder=\"Search symbols, e.g. وبملت\" type=\"search\"></label>",
+      "css": ".ds-field{font-family:Arial,\"Noto Sans Arabic\",Tahoma,sans-serif;line-height:1.5;display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted,#5d6c82);font-weight:600}.ds-field input{font:400 14px Arial,Tahoma,sans-serif;min-height:36px;border:1px solid #cbd5e5;border-radius:5px;background:var(--paper,#fff);color:var(--ink,#202c43);padding:6px 10px;caret-color:var(--blue,#2248a5)}.ds-field input::placeholder{color:#68788c}.ds-field input:focus-visible{outline:3px solid #7198f1;outline-offset:3px}"
+    },
+    {
+      "name": "Main navigation",
+      "kind": "nav",
+      "description": "Current-page state on the cobalt navigation shell.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Main navigation\"><a href=\"#overview\" aria-current=\"page\">Overview</a><a href=\"#reports\">Report library</a><a href=\"#symbols\">Symbol explorer</a></nav>",
+      "css": ".ds-nav{font-family:Arial,\"Noto Sans Arabic\",Tahoma,sans-serif;line-height:1.5;display:flex;flex-direction:column;gap:6px;background:var(--blue,#2248a5);padding:16px}.ds-nav a{color:#e1e9ff;text-decoration:none;padding:12px 10px;border-radius:7px;font-size:13px}.ds-nav a:hover{background:#2d55b7;color:#fff}.ds-nav a[aria-current=page]{background:var(--paper,#fff);color:var(--blue,#2248a5);font-weight:600}.ds-nav a:focus-visible{outline:3px solid #7198f1;outline-offset:3px}@media(prefers-reduced-motion:no-preference){.ds-nav a{transition:background-color 140ms ease-out}}"
+    },
+    {
+      "name": "Analysis badges",
+      "kind": "chip",
+      "refersTo": "badge-ready",
+      "description": "Noninteractive file validation states.",
+      "html": "<span class=\"ds-badge ds-ready\">Validated</span> <span class=\"ds-badge ds-warning\">Analysis unavailable</span>",
+      "css": ".ds-badge{font-family:Arial,\"Noto Sans Arabic\",Tahoma,sans-serif;line-height:1.5;display:inline-flex;align-items:center;padding:3px 7px;border-radius:4px;font-size:11px;font-weight:600}.ds-ready{color:var(--positive,#137465);background:var(--positive-soft,#e7f4f0)}.ds-warning{color:var(--amber,#815b12);background:var(--amber-soft,#faf1dc)}"
+    },
+    {
+      "name": "Work panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Flat bordered work area with title and supporting context.",
+      "html": "<section class=\"ds-panel\"><header class=\"ds-heading\"><h2>Symbol flows</h2><p>Compare exact symbols across the selected reports.</p></header></section>",
+      "css": ".ds-panel{font-family:Arial,\"Noto Sans Arabic\",Tahoma,sans-serif;line-height:1.5;background:var(--paper,#fff);color:var(--ink,#202c43);border:1px solid var(--line,#dce3ee);border-radius:var(--radius,12px);overflow:hidden}.ds-heading{padding:20px 22px 16px}.ds-heading h2{font-size:17px;font-weight:600;line-height:1.4;letter-spacing:-.015em;margin:0 0 5px}.ds-heading p{margin:0;color:var(--muted,#5d6c82);font-size:12px}"
+    },
+    {
+      "name": "Selected report inspector",
+      "kind": "custom",
+      "description": "Date and exact measurements linked to a source workbook.",
+      "html": "<aside class=\"ds-inspector\"><h3>Selected report</h3><div class=\"ds-date\">1405/08/19</div><dl><div><dt>Individual net</dt><dd>+7.41 T</dd></div></dl><a class=\"ds-source\" href=\"#reports\">Original Excel</a></aside>",
+      "css": ".ds-inspector{font-family:Arial,\"Noto Sans Arabic\",Tahoma,sans-serif;line-height:1.5;background:#f8faff;color:var(--ink,#202c43);border-left:1px solid var(--line,#dce3ee);padding:22px 20px}.ds-inspector h3{font-size:12px;color:var(--muted,#5d6c82);font-weight:400;margin:0 0 5px}.ds-date{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;margin-bottom:17px}.ds-inspector dl{font-size:12px;margin:0 0 16px}.ds-inspector dl>div{display:flex;justify-content:space-between;gap:12px}.ds-inspector dt{color:var(--muted,#5d6c82)}.ds-inspector dd{margin:0;font-weight:600;color:var(--positive,#137465);font-variant-numeric:tabular-nums}.ds-source{display:inline-flex;background:var(--paper,#fff);border:1px solid var(--line,#dce3ee);border-radius:6px;padding:8px 14px;color:var(--ink,#202c43);font-size:12px;font-weight:600;text-decoration:none}.ds-source:hover{background:var(--blue-soft,#edf2ff);border-color:#acbfe5}.ds-source:focus-visible{outline:3px solid #7198f1;outline-offset:3px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Inspectable market history",
+    "overview": "A statistical atlas translated into a working research app: cobalt navigation frames a cool, near-white workspace, while white work areas keep charts, exact-symbol tables, and source actions readable. The atmosphere is calm, compact, and factual.\n\nHierarchy comes from typography, aligned measurements, thin separators, and restrained tonal changes. Teal and brick carry transfer direction; amber carries analysis warnings. Persian symbol labels and Solar Hijri dates remain intact within the current English interface. The language choice is provisional, not a permanent visual identity commitment.",
+    "keyCharacteristics": [
+      "Compact research typography with tabular measurements.",
+      "Cobalt navigation and cool paper work areas.",
+      "Semantic transfer colors with signed values and explicit labels.",
+      "Flat bordered containers and visible keyboard focus."
+    ],
+    "rules": [
+      {
+        "name": "The Transfer Color Rule",
+        "body": "Teal and brick describe the direction of ownership transfers; signed values and labels accompany them.",
+        "section": "colors"
+      },
+      {
+        "name": "The Flat Work Area Rule",
+        "body": "Panels and filters use outlines and tonal contrast instead of ambient shadows.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep date range, instrument scope, and units close to measurements.",
+      "Do use tabular numerals and right alignment for numeric table columns.",
+      "Do preserve Persian labels and exact symbol suffixes with appropriate text direction.",
+      "Do keep source downloads and analysis-status labels visible.",
+      "Do let tables scroll horizontally while the surrounding workspace fits the viewport."
+    ],
+    "donts": [
+      "Don't reuse teal and brick as arbitrary decorative accents.",
+      "Don't replace aligned table values with decorative cards.",
+      "Don't rely on color alone to communicate transfer direction or analysis status.",
+      "Don't introduce ambient shadows on ordinary panels."
+    ]
+  }
+}

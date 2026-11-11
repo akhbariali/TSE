@@ -1,0 +1,29 @@
+# Original workbooks and local data are never committed.
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+*.XLSX
+*.XLS
+*.XLSM
+*.XLSB
+/data/
+/reports/
+
+# Python, local environments, logs, and tooling captures.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.log
+*.sqlite*
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
+.impeccable/review/
+.impeccable/questions/
+.impeccable/mocks/
+node_modules/
+.DS_Store

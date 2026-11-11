@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#2248a5">
+  <title>TSE Market Archive</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%232248a5'/%3E%3Cpath d='M10 28V18m10 10V10m10 18V15' stroke='white' stroke-width='4'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<aside class="sidebar">
+  <a class="brand" href="#overview" aria-label="TSE Market Archive home">
+    <svg viewBox="0 0 36 36" aria-hidden="true"><path d="M7 27V17m11 10V7m11 20V12"/></svg>
+    <span>TSE<span class="brand-sub">Market Archive</span></span>
+  </a>
+  <nav aria-label="Main navigation">
+    <a href="#overview" data-nav="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 0h7v7h-7z"/></svg>Overview</a>
+    <a href="#reports" data-nav="reports"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7m-7 4h7"/></svg>Report library<span id="nav-count" class="nav-count">—</span></a>
+    <a href="#symbols" data-nav="symbols"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h17M7 14l4-5 4 3 5-7"/></svg>Symbol explorer</a>
+    <a href="#methodology" data-nav="methodology"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5zM9 7h6m-6 5h6m-6 5h4"/></svg>Data & methodology</a>
+  </nav>
+  <div class="sidebar-footer"><span class="source-mark">TSE source archive</span><p>Original reports.<br>Inspectable market history.</p><a href="https://www.tse.ir/download-center" target="_blank" rel="noreferrer">Visit source website <span aria-hidden="true">↗</span></a></div>
+</aside>
+<div class="workspace">
+  <header class="topbar"><span id="breadcrumb">Research / Overview</span><div class="top-actions"><span id="archive-state" class="archive-state">Loading archive</span><button id="sync-button" class="button small secondary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 2M4 17l2 2a7 7 0 0 0 12-2"/></svg>Update archive</button></div></header>
+  <main id="main" tabindex="-1">
+    <div id="notice" class="notice" role="status" hidden></div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div id="content"><div class="loading-state">Loading your market archive…</div></div>
+  </main>
+  <footer class="page-footer"><span>Tehran Securities Exchange · Public report archive</span><span>Solar Hijri dates · Source values in rials</span></footer>
+</div>
+<div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
