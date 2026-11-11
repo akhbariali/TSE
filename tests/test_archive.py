@@ -132,6 +132,7 @@ class QueryTests(unittest.TestCase):
     def setUp(self):
         self.db=sqlite3.connect(':memory:');self.db.row_factory=sqlite3.Row
         self.db.executescript('''CREATE TABLE active_reports (sha,date,daily,published_at,report_id);
+          CREATE VIEW symbol_reports AS SELECT * FROM active_reports;
           CREATE TABLE flows(workbook_sha,symbol,company,search_text,turnover_rial,retail_net_rial,
                              retail_buy_rial,retail_sell_rial);''')
         for n in range(1,4):

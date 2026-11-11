@@ -16,7 +16,7 @@ from analyze_reports import analyze
 from download_reports import ROOT, atomic_json, read_json
 
 DB = ROOT / 'data/archive.sqlite3'
-PARSER_VERSION = 4
+PARSER_VERSION = 5
 
 
 def connect(path=DB):
@@ -49,13 +49,30 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS flows_symbol ON flows(symbol);
         CREATE INDEX IF NOT EXISTS workbooks_date ON workbooks(date);
-        CREATE VIEW IF NOT EXISTS active_reports AS
+        ''')
+
+        if 'source_data' not in {r[1] for r in db.execute('PRAGMA table_info(flows)')}:
+            db.execute("ALTER TABLE flows ADD COLUMN source_data TEXT NOT NULL DEFAULT '{}'")
+        db.executescript("""
+        DROP VIEW IF EXISTS active_reports;
+        CREATE VIEW active_reports AS
           SELECT * FROM (
             SELECT *, ROW_NUMBER() OVER (
-              PARTITION BY date ORDER BY COALESCE(published_at,'') DESC, report_id DESC, sha
-            ) AS revision_rank FROM workbooks WHERE state='ready'
+              PARTITION BY date ORDER BY (state='ready') DESC, COALESCE(published_at,'') DESC, report_id DESC, sha
+            ) AS revision_rank FROM workbooks
+            WHERE date IS NOT NULL AND (state='ready' OR json_extract(daily,'$.quality.market_eligible')=1)
           ) WHERE revision_rank=1;
-        ''')
+        DROP VIEW IF EXISTS symbol_reports;
+        CREATE VIEW symbol_reports AS
+          SELECT * FROM (
+            SELECT *, ROW_NUMBER() OVER (
+              PARTITION BY date ORDER BY COALESCE(json_extract(daily,'$.quality.market_eligible'),state='ready') DESC,
+              COALESCE(json_extract(daily,'$.quality.value.usable_rows'),0) DESC,
+              (state='ready') DESC, COALESCE(published_at,'') DESC, report_id DESC, sha
+            ) AS revision_rank FROM workbooks
+            WHERE date IS NOT NULL AND (state='ready' OR json_extract(daily,'$.quality.symbol_eligible')=1)
+          ) WHERE revision_rank=1;
+        """)
 
 
 def normalize(text):
@@ -100,9 +117,11 @@ def ingest(entry, retry=False):
     with connect() as db:
         db.execute('DELETE FROM workbooks WHERE sha=?', (digest,))
         db.execute(f'INSERT INTO workbooks ({",".join(columns)}) VALUES ({",".join("?" for _ in columns)})', list(meta.values()))
-        db.executemany(f'INSERT INTO flows VALUES ({",".join("?" for _ in range(4+len(flow_keys)))})',
+        insert_columns = ['workbook_sha','symbol','company','search_text',*flow_keys,'source_data']
+        db.executemany(f'INSERT INTO flows ({",".join(insert_columns)}) VALUES ({",".join("?" for _ in insert_columns)})',
                        [(digest, r['symbol'], r['company'], normalize(r['symbol']+' '+r['company']),
-                         *[float(r[k]) if r[k] != '' else None for k in flow_keys]) for r in records])
+                         *[float(r[k]) if r[k] not in ('',None) else None for k in flow_keys],
+                         json.dumps(r['source_data'],ensure_ascii=False,default=str)) for r in records])
     print(f"{state}: {path.name} ({len(records)} rows){': '+error if error else ''}", flush=True)
     return True
 

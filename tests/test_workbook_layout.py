@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from workbook_layout import (SheetRows, detect_table, LayoutError, decimal_value,
                              read_workbook, daily_sheets)
 from analyze_reports import analyze, summary_values
+from unittest.mock import patch
 
 
 def ownership(kind='value', shifted=0, reverse=False):
@@ -69,11 +70,16 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(t.columns['retail_buy'],'D')
         self.assertTrue(any('recovered' in n for n in t.notes))
         del r[3]['F']
-        with self.assertRaisesRegex(LayoutError,'missing required'):detect_table(r)
+        t=detect_table(r)
+        self.assertIsNone(t.rows['نماد1']['retail_buy'])
+        self.assertTrue(t.issues)
 
-    def test_conflicting_investor_headings_rejected(self):
+    def test_conflicting_investor_headings_quarantine_only_ambiguous_field(self):
         r=ownership();r[3]['E']='حقیقی'
-        with self.assertRaisesRegex(LayoutError,'duplicate/ambiguous'):detect_table(r)
+        t=detect_table(r)
+        self.assertIsNone(t.rows['نماد1']['retail_buy'])
+        self.assertEqual(t.rows['نماد1']['retail_sell'],30)
+        self.assertTrue(any('duplicate/ambiguous' in issue for issue in t.issues))
 
     def test_missing_and_invalid_amounts_are_not_zero(self):
         for value in [None,'bad','#REF!','NaN']:
@@ -81,7 +87,8 @@ class LayoutTests(unittest.TestCase):
             if value is None:del r[4]['D']
             else:r[4]['D']=value
             t=detect_table(r)
-            self.assertFalse(t.rows)
+            self.assertIsNone(t.rows['نماد1']['retail_buy'])
+            self.assertEqual(t.rows['نماد1']['retail_sell'],30)
             self.assertTrue(t.issues)
 
     def test_total_in_index_column_and_secondary_table(self):
@@ -98,6 +105,7 @@ class LayoutTests(unittest.TestCase):
         t=detect_table(r)
         self.assertEqual(t.rows['نماد1']['retail_buy'],60)
         self.assertTrue(any('duplicate symbol' in n for n in t.issues))
+        self.assertTrue(t.rows['نماد1']['ambiguous'])
 
     def test_strict_numeric_normalization_and_precision(self):
         self.assertEqual(decimal_value('۱۲۳٬۴۵۶٫۷'),Decimal('123456.7'))
@@ -123,11 +131,13 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(len(day['layouts']),2)
             self.assertEqual(day['volume'],100)
 
-    def test_missing_metric_column_fails_without_guessing(self):
+    def test_missing_metric_column_keeps_other_fields_without_guessing(self):
         r=ownership()
         for row in r.values():
             row.pop('D',None);row.pop('F',None)
-        with self.assertRaisesRegex(LayoutError,'missing required'):detect_table(r)
+        t=detect_table(r)
+        self.assertIsNone(t.rows['نماد1']['retail_buy'])
+        self.assertTrue(t.issues)
 
     def test_buy_and_sell_summary_shares_follow_retail_headers(self):
         r={4:{'B':'حجم کل معاملات','L':'ارزش کل معاملات'},5:{'B':'100','L':'100'},
@@ -140,12 +150,103 @@ class LayoutTests(unittest.TestCase):
         summary={4:{'B':'حجم کل معاملات','L':'ارزش کل معاملات'},5:{'B':'100','L':'100'}}
         sheets={'Market summary':summary,'v':ownership('volume'),'a':ownership(),
                 'تغییر مالکیت خراب':{1:{'A':'unrecognizable'}}}
-        with self.assertRaisesRegex(LayoutError,'symbol header'):daily_sheets(sheets)
+        _,volume,value=daily_sheets(sheets)
+        self.assertTrue(any('symbol header' in note for note in value.notes))
+        self.assertEqual(len(volume.rows),1)
 
     def test_conflicting_daily_tables_rejected(self):
         summary={4:{'B':'حجم کل معاملات','L':'ارزش کل معاملات'},5:{'B':'100','L':'100'}}
         sheets={'Market summary':summary,'v':ownership('volume'),'a':ownership(),'b':ownership()}
         with self.assertRaisesRegex(LayoutError,'multiple'):daily_sheets(sheets)
+
+
+class PartialDataTests(unittest.TestCase):
+    def parse(self, value=None, volume=None, summary_total='100'):
+        sheets={'Market summary':{1:{'A':'1405/08/19'},
+                4:{'B':'حجم کل معاملات','L':'ارزش کل معاملات'},
+                5:{'B':summary_total,'L':summary_total}}}
+        if value is not None:sheets['value']=value
+        if volume is not None:sheets['volume']=volume
+        with patch('analyze_reports.workbook',return_value=sheets):
+            return analyze(Path('fixture.xlsx'))
+
+    def test_summary_disagreement_keeps_reconciled_detail(self):
+        day,records,issues=self.parse(ownership(),ownership('volume'),summary_total='200')
+        self.assertTrue(issues)
+        self.assertTrue(day['quality']['market_eligible'])
+        self.assertEqual(day['turnover_rial'],100)
+        self.assertEqual(day['source_summary_turnover_rial'],200)
+        self.assertEqual(records[0]['retail_net_rial'],30)
+
+    def test_value_only_report_supports_value_metrics_without_volume_or_vwap(self):
+        day,records,issues=self.parse(value=ownership())
+        self.assertTrue(day['quality']['market_eligible'])
+        self.assertTrue(day['quality']['symbol_eligible'])
+        self.assertIsNone(day['volume'])
+        self.assertEqual(records[0]['retail_net_rial'],30)
+        self.assertIsNone(records[0]['retail_buy_vwap_rial'])
+        self.assertIsNone(records[0]['volume'])
+
+    def test_missing_cell_preserves_other_fields_but_blocks_dependent_metrics(self):
+        value=ownership();del value[4]['D']
+        day,records,issues=self.parse(value,ownership('volume'))
+        record=records[0]
+        self.assertIsNone(record['retail_buy_rial'])
+        self.assertEqual(record['retail_sell_rial'],30)
+        self.assertEqual(record['volume'],100)
+        self.assertIsNone(record['retail_net_rial'])
+        self.assertIsNone(record['retail_buy_vwap_rial'])
+        self.assertFalse(day['quality']['market_eligible'])
+
+    def test_contradictory_row_does_not_enter_aggregate(self):
+        value=ownership();value[4]['D']='61'
+        # A discrepancy greater than the one-rial cached-value allowance.
+        value[4]['D']='65'
+        value[6]=value.pop(5)
+        value[5]={'A':'2','B':'نماد2','C':'شرکت2','D':'60','E':'40','H':'30','I':'70'}
+        day,records,issues=self.parse(value,ownership('volume'))
+        self.assertEqual(day['symbols'],1)
+        self.assertEqual(day['turnover_rial'],100)
+        self.assertFalse(day['quality']['market_eligible'])
+        self.assertTrue(day['quality']['symbol_eligible'])
+        self.assertIsNone(records[0]['retail_net_rial'])
+        self.assertEqual(records[1]['retail_net_rial'],30)
+
+    def test_volume_failure_does_not_block_value_flow(self):
+        volume=ownership('volume');volume[4]['D']='bad'
+        day,records,issues=self.parse(ownership(),volume)
+        self.assertTrue(day['quality']['market_eligible'])
+        self.assertEqual(records[0]['retail_net_rial'],30)
+        self.assertIsNone(records[0]['volume'])
+        self.assertIsNone(records[0]['retail_buy_vwap_rial'])
+
+    def test_duplicate_symbol_has_no_derived_metrics(self):
+        value=ownership();value[6]=value.pop(5);value[5]=dict(value[4])
+        day,records,issues=self.parse(value,ownership('volume'))
+        self.assertFalse(day['quality']['symbol_eligible'])
+        self.assertIsNone(records[0]['retail_net_rial'])
+
+    def test_bad_footer_prevents_market_total_even_with_good_rows(self):
+        value=ownership();value[5]['D']='500'
+        day,records,issues=self.parse(value,ownership('volume'))
+        self.assertFalse(day['quality']['market_eligible'])
+        self.assertTrue(day['quality']['symbol_eligible'])
+        self.assertEqual(records[0]['retail_net_rial'],30)
+
+    def test_extra_traded_volume_symbol_prevents_claiming_complete_value_table(self):
+        volume=ownership('volume');volume[6]=volume.pop(5)
+        volume[5]={'A':'2','B':'نماد2','C':'شرکت2','D':'60','E':'40','H':'30','I':'70'}
+        day,records,issues=self.parse(ownership(),volume)
+        self.assertFalse(day['quality']['market_eligible'])
+        self.assertTrue(day['quality']['symbol_eligible'])
+        self.assertTrue(any('Value table incomplete' in issue for issue in issues))
+
+    def test_volume_only_report_retains_real_data(self):
+        day,records,issues=self.parse(volume=ownership('volume'))
+        self.assertEqual(records[0]['volume'],100)
+        self.assertEqual(records[0]['retail_net_volume'],30)
+        self.assertIsNone(records[0]['retail_net_rial'])
+        self.assertFalse(day['quality']['market_eligible'])
 
 
 if __name__=='__main__':unittest.main()

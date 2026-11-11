@@ -219,3 +219,7 @@ Motion is restrained and conditional on `prefers-reduced-motion: no-preference`:
 - **Don't** replace aligned table values with decorative cards.
 - **Don't** rely on color alone to communicate transfer direction or analysis status.
 - **Don't** introduce ambient shadows on ordinary panels.
+
+## Report data quality
+
+The report library retains its compact table and uses the existing amber warning badge for usable source warnings. Labels distinguish complete value tables, partial symbol data, and fields available for inspection. Native disclosure shows interpreted columns and usable-row counts; a nested source-issues disclosure keeps long lists out of the initial expanded view. Parsed CSV sits alongside the original Excel action. Overview and symbol coverage name their separate completeness requirements.

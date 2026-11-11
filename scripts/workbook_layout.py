@@ -1,7 +1,8 @@
 """Read Excel table meaning from headers and merged ranges, never fixed positions.
 
 Only explicit labels and redundant percentage headers establish investor identity.
-Unresolvable/missing columns raise LayoutError; absent data is never invented as 0.
+Identifiable fields survive missing/ambiguous columns. Unidentifiable tables raise
+LayoutError; absent or contradictory data is never invented as 0.
 """
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -233,7 +234,7 @@ def detect_table(rows):
     all_columns = set(col for index in header_rows for col in rows[index])
     # Include blank header cells represented by a merge or by real data columns.
     all_columns.update(rows[first])
-    mappings = {}; partial = []; group_kinds = set()
+    mappings = {}; partial = []; group_kinds = set(); heading_issues = []; ambiguous = set()
     for col in sorted(all_columns, key=col_number):
         if col in (symbol_column, company_column):
             continue
@@ -273,17 +274,22 @@ def detect_table(rows):
         if percent or not r:
             continue
         key = r+'_'+a
-        if key in mappings:
-            raise LayoutError(f'{name}: duplicate/ambiguous {key} headings at {mappings[key]} and {col}')
-        mappings[key] = col
+        if key in mappings or key in ambiguous:
+            heading_issues.append(f'{name}: duplicate/ambiguous {key} headings; this field is unavailable')
+            mappings.pop(key, None)
+            ambiguous.add(key)
+        else:
+            mappings[key] = col
     required = {'retail_buy','institutional_buy','retail_sell','institutional_sell'}
     missing = sorted(required-set(mappings))
+    if not mappings:
+        raise LayoutError(f'{name}: no unambiguous investor amount columns')
     if missing:
-        raise LayoutError(f'{name}: missing required amount columns: {", ".join(missing)}; cannot safely calculate ownership flows')
+        heading_issues.append(f'{name}: unavailable amount columns: {", ".join(missing)}; dependent metrics remain blank')
     expected = {'retail_buy':'D','institutional_buy':'E','retail_sell':'H','institutional_sell':'I'}
     if mappings != expected or symbol_column!='B' or company_column!='C' or first!=5:
         notes.append(f'{name}: columns and row positions normalized using their headers')
-    result = Table(name,kind,symbol_column,company_column,first,mappings,notes=notes)
+    result = Table(name,kind,symbol_column,company_column,first,mappings,notes=notes,issues=heading_issues)
     for index,row in sorted(rows.items()):
         if index < first:
             continue
@@ -307,17 +313,26 @@ def detect_table(rows):
                 result.issues.append(f'{name}: row {index} has amounts without a valid symbol')
             continue
         if symbol in result.rows:
-            result.issues.append(f'{name}: duplicate symbol {symbol!r} at row {index}; not overwritten')
+            message = f'{name}: duplicate symbol {symbol!r} at row {index}; excluded from derived metrics'
+            result.issues.append(message)
+            result.rows[symbol]['ambiguous'] = True
+            result.rows[symbol]['issues'].append(message)
             continue
-        try:
-            values = {key:decimal_value(row.get(col),f'{name}!{col}{index} ({symbol})') for key,col in mappings.items()}
-            if any(v<0 for v in values.values()):
-                raise LayoutError(f'{name}: negative trading amount for {symbol!r} at row {index}')
-        except LayoutError as error:
-            result.issues.append(str(error))
-            continue
+        values = dict.fromkeys(required)
+        row_issues = []
+        for key,col in mappings.items():
+            try:
+                number = decimal_value(row.get(col),f'{name}!{col}{index} ({symbol})')
+                if number < 0:
+                    raise LayoutError(f'{name}!{col}{index}: negative trading amount for {symbol!r}')
+                if kind == 'volume' and number != number.to_integral_value():
+                    raise LayoutError(f'{name}!{col}{index}: fractional share quantity for {symbol!r}')
+                values[key] = number
+            except LayoutError as error:
+                row_issues.append(str(error))
+        result.issues.extend(row_issues)
         result.rows[symbol] = {'company': str(row.get(company_column,'')).strip() if company_column else '',
-                               'source_row': index, **values}
+                               'source_row': index, 'issues': row_issues, 'ambiguous': False, **values}
     if not company_column:
         result.notes.append(f'{name}: company-name column absent; symbols retained without inventing names')
     return result
@@ -332,7 +347,7 @@ def _is_number(value):
 
 
 def daily_sheets(sheets):
-    tables = {}; summary = []; errors = []; ownership_errors = []
+    tables = {}; summary = []; errors = []
     for name, rows in sheets.items():
         if not rows:
             continue
@@ -347,9 +362,8 @@ def daily_sheets(sheets):
                     raise LayoutError(f'Ambiguous daily report: multiple {table.kind} ownership tables')
                 tables[table.kind] = table
             except LayoutError as error:
-                errors.append(str(error))
-                if ownership:
-                    ownership_errors.append(str(error))
+                if ownership or 'multiple' in str(error):
+                    errors.append(str(error))
         if ('خلاصه' in n and 'بازار' in n) or n in {'summary','marketsummary','marketoverview'}:
             summary.append(rows)
     if len(summary)!=1:
@@ -357,14 +371,14 @@ def daily_sheets(sheets):
         summary = [rs for rs in sheets.values() if any(
             'معاملات' in normalized(v) and 'حجم' in normalized(v) and ('کل' in normalized(v) or 'total' in normalized(v))
             for i,row in rs.items() if i<=50 for v in row.values())]
-    missing = {'volume','value'}-set(tables)
-    if missing or len(summary)!=1:
+    if not tables:
         detail = '; '.join(errors[:5])
-        if not any('مالکیت' in normalized(n) for n in sheets) and not tables:
-            detail = 'This workbook is not a supported daily ownership report (for example, a monthly/market-review layout)'
-        raise LayoutError(f'Missing or ambiguous daily tables: {", ".join(sorted(missing)) or "summary"}. {detail}')
-    # Never silently ignore a broken ownership sheet merely because a second
-    # candidate happened to parse. Conflicting interpretations need review.
-    if ownership_errors or any('multiple' in e or 'Ambiguous' in e for e in errors):
-        raise LayoutError('; '.join(errors))
-    return summary[0],tables['volume'],tables['value']
+        raise LayoutError('No identifiable daily ownership table. '+detail)
+    if len(summary)>1 or any('multiple' in e or 'Ambiguous daily' in e for e in errors):
+        raise LayoutError('Ambiguous daily tables: '+'; '.join(errors))
+    for kind in {'volume','value'}-set(tables):
+        errors.append(f'Missing {kind} ownership table; dependent metrics remain blank')
+    # A broken table does not invalidate the independently identified other table.
+    for table in tables.values():
+        table.notes.extend(errors)
+    return summary[0] if summary else {}, tables.get('volume'), tables.get('value')

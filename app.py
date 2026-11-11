@@ -36,8 +36,9 @@ def validate_date(value):
     return value
 
 
-def selection(db, query):
-    available = rows(db, 'SELECT sha,date,daily,published_at,report_id FROM active_reports ORDER BY date')
+def selection(db, query, kind='market'):
+    view = 'symbol_reports' if kind=='symbol' else 'active_reports'
+    available = rows(db, f'SELECT sha,date,daily,published_at,report_id FROM {view} ORDER BY date')
     start = validate_date(query.get('start', ''))
     end = validate_date(query.get('end', ''))
     if start and end and start > end:
@@ -52,8 +53,8 @@ def selection(db, query):
     return available, selected
 
 
-def scope_clause(db, query):
-    available, selected = selection(db, query)
+def scope_clause(db, query, kind='market'):
+    available, selected = selection(db, query, kind)
     if not selected:
         return '0', [], selected
     return 'a.date BETWEEN ? AND ?', [selected[0]['date'], selected[-1]['date']], selected
@@ -61,7 +62,9 @@ def scope_clause(db, query):
 
 def scope_info(selected):
     return {'start': selected[0]['date'] if selected else None,
-            'end': selected[-1]['date'] if selected else None, 'reports': len(selected)}
+            'end': selected[-1]['date'] if selected else None, 'reports': len(selected),
+            'reports_with_warnings': sum(json.loads(r['daily']).get('validation_issues',0)>0 for r in selected),
+            'partial_reports': sum(not json.loads(r['daily']).get('quality',{}).get('market_eligible',True) for r in selected)}
 
 
 def numeric_day(row):
@@ -94,6 +97,8 @@ def status(db):
               SUM(state='ready') AS ready, SUM(state='warning') AS warning,
               SUM(state='unsupported') AS unsupported FROM workbooks''').fetchone())
     active = dict(db.execute('SELECT COUNT(*) AS reports, MIN(date) AS first_date, MAX(date) AS last_date FROM active_reports').fetchone())
+    active['symbol_reports'] = db.execute('SELECT COUNT(*) FROM symbol_reports').fetchone()[0]
+    active['market_warning_reports'] = db.execute("SELECT COUNT(*) FROM active_reports WHERE state='warning'").fetchone()[0]
     with SYNC_LOCK:
         syncing = SYNC_PROCESS is not None and SYNC_PROCESS.poll() is None
     return {'download': download, 'indexing': indexing, 'counts': {**count, **active},
@@ -105,7 +110,7 @@ def status(db):
 
 
 def overview(db, query):
-    available, selected = selection(db, query)
+    available, selected = selection(db, query, 'symbol' if query.get('scope_kind')=='symbol' else 'market')
     days = [numeric_day(r) for r in selected]
     aggregate = {'net_rial': sum(d['retail_net_rial'] for d in days),
                  'turnover_rial': sum(d['turnover_rial'] for d in days),
@@ -119,7 +124,8 @@ def overview(db, query):
 
 
 def flow_query(db, query, export=False):
-    clause, params, selected = scope_clause(db, query)
+    clause, params, selected = scope_clause(db, query, 'symbol')
+    clause += ' AND f.retail_net_rial IS NOT NULL AND f.turnover_rial IS NOT NULL'
     search = normalize(query.get('q', '').strip())
     if search:
         clause += ' AND instr(f.search_text,?)>0'
@@ -141,7 +147,7 @@ def flow_query(db, query, export=False):
                 SUM(f.retail_buy_rial) AS buy_rial, SUM(f.retail_sell_rial) AS sell_rial,
                 SUM(f.retail_net_rial>0) AS positive_days, SUM(f.retail_net_rial<0) AS negative_days,
                 SUM(f.retail_net_rial)/NULLIF(SUM(f.turnover_rial),0) AS flow_ratio
-              FROM flows f JOIN active_reports a ON f.workbook_sha=a.sha
+              FROM flows f JOIN symbol_reports a ON f.workbook_sha=a.sha
               WHERE {clause} GROUP BY f.symbol HAVING {having}'''
     total = db.execute('SELECT COUNT(*) FROM ('+sql+')', params).fetchone()[0]
     if export:
@@ -177,6 +183,7 @@ def reports(db, query):
         daily = json.loads(item.pop('daily') or '{}')
         item['normalizations'] = daily.get('normalizations', [])
         item['layouts'] = daily.get('layouts', [])
+        item['quality'] = daily.get('quality', {})
     return {'items': items, 'total': total, 'page': page, 'size': size}
 
 
@@ -184,16 +191,30 @@ def symbol_detail(db, query):
     symbol = query.get('symbol', '')
     if not symbol:
         raise ValueError('Choose a symbol.')
-    clause, params, selected = scope_clause(db, query)
-    data = rows(db, f'''SELECT a.date,a.sha,a.published_at,f.* FROM flows f
-                        JOIN active_reports a ON a.sha=f.workbook_sha
-                        WHERE {clause} AND f.symbol=? ORDER BY a.date''', [*params, symbol])
+    clause, params, selected = scope_clause(db, query, 'symbol')
+    data = rows(db, f'''SELECT a.date,a.sha,a.published_at,a.state AS source_state,f.* FROM flows f
+                        JOIN symbol_reports a ON a.sha=f.workbook_sha
+                        WHERE {clause} AND f.symbol=? AND f.retail_net_rial IS NOT NULL ORDER BY a.date''', [*params, symbol])
     return {'symbol': symbol, 'company': data[-1]['company'] if data else '',
             'scope': scope_info(selected), 'days': data,
             'net_rial': sum(r['retail_net_rial'] for r in data),
             'turnover_rial': sum(r['turnover_rial'] for r in data),
             'positive_days': sum(r['retail_net_rial'] > 0 for r in data),
             'negative_days': sum(r['retail_net_rial'] < 0 for r in data)}
+
+
+def report_records(db, digest):
+    if not db.execute('SELECT 1 FROM workbooks WHERE sha=?', (digest,)).fetchone():
+        raise ValueError('Unknown workbook')
+    result = rows(db, 'SELECT * FROM flows WHERE workbook_sha=? ORDER BY symbol', (digest,))
+    for record in result:
+        provenance = json.loads(record.pop('source_data'))
+        record.pop('search_text')
+        record.update({k:v for k,v in provenance.items() if k not in ('volume_amounts','value_amounts','issues')})
+        record.update({k+'_rial':v for k,v in provenance.get('value_amounts',{}).items()})
+        record.update({k+'_volume':v for k,v in provenance.get('volume_amounts',{}).items()})
+        record['issues'] = '; '.join(provenance.get('issues',[]))
+    return result
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -238,9 +259,12 @@ class Handler(BaseHTTPRequestHandler):
                     result = reports(db, query)
                 elif route == '/api/symbol':
                     result = symbol_detail(db, query)
-                elif route in ('/api/export/flows', '/api/export/daily'):
-                    result = flow_query(db, query, export=True)['items'] if route.endswith('flows') else overview(db, query)['days']
-                    result = [{k:v for k,v in record.items() if k not in ('normalizations','layouts')} for record in result]
+                elif route in ('/api/export/flows', '/api/export/daily', '/api/export/report'):
+                    if route.endswith('report'):
+                        result = report_records(db, query.get('sha',''))
+                    else:
+                        result = flow_query(db, query, export=True)['items'] if route.endswith('flows') else overview(db, query)['days']
+                    result = [{k:v for k,v in record.items() if k not in ('normalizations','layouts','quality')} for record in result]
                     output = io.StringIO()
                     output.write('\ufeff')
                     if result:

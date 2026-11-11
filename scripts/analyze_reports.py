@@ -77,70 +77,131 @@ def write_csv(path, records):
         writer.writerows(records)
 
 
+KEYS = ('retail_buy', 'institutional_buy', 'retail_sell', 'institutional_sell')
+
+
+def close_amount(actual, expected, kind='value'):
+    if actual is None or expected is None:
+        return False
+    tolerance = max(Decimal(1), abs(expected)*Decimal('1e-14')) if kind=='value' else Decimal(0)
+    return abs(actual-expected) <= tolerance
+
+
+def checked_row(row, kind):
+    if not row or row.get('ambiguous') or any(row.get(k) is None for k in KEYS):
+        return False
+    buy = row['retail_buy'] + row['institutional_buy']
+    sell = row['retail_sell'] + row['institutional_sell']
+    # Amounts used for flow ratios and VWAPs must agree at the row level.
+    return abs(buy-sell) <= (Decimal(1) if kind=='value' else Decimal(0))
+
+
+def table_quality(table, source_total, issues):
+    if table is None:
+        return {'rows': 0, 'usable_rows': 0, 'complete': False, 'footer_matches': False}
+    usable = [row for row in table.rows.values() if checked_row(row, table.kind)]
+    footer_matches = bool(table.totals and len(table.totals)==4)
+    for key, expected in (table.totals or {}).items():
+        values = [r.get(key) for r in table.rows.values()]
+        actual = sum(values) if all(v is not None for v in values) else None
+        if not close_amount(actual, expected, table.kind):
+            footer_matches = False
+            issues.append(f'{table.name}: {key} footer mismatch: {actual} vs {expected}')
+    total = sum(r['retail_buy']+r['institutional_buy'] for r in usable)
+    summary_matches = close_amount(total, source_total, table.kind)
+    if source_total is not None and not summary_matches:
+        issues.append(f'{table.kind.capitalize()} summary total mismatch: usable detail {total} vs summary {source_total}')
+    # Completeness requires all observed rows to pass and a corroborating total.
+    # A missing/corrupt footer must not be bypassed just because a summary matches.
+    complete = bool(usable and len(usable)==len(table.rows) and not table.issues
+                    and (footer_matches if table.totals is not None else summary_matches))
+    return {'rows': len(table.rows), 'usable_rows': len(usable), 'complete': complete,
+            'footer_matches': footer_matches, 'summary_matches': summary_matches}
+
+
 def analyze(path):
     summary, vol_table, val_table = daily_sheets(workbook(path))
     date = report_date(summary, path)
-    source_volume, source_turnover, buy_share, sell_share = summary_values(summary)
-    volume, value = vol_table.rows, val_table.rows
-    records = []
-    issues = [*vol_table.issues, *val_table.issues]
+    tables = [t for t in (vol_table, val_table) if t is not None]
+    issues = list(dict.fromkeys(issue for t in tables for issue in t.issues))
+    try:
+        source_volume, source_turnover, buy_share, sell_share = summary_values(summary)
+    except ValueError as error:
+        source_volume = source_turnover = buy_share = sell_share = None
+        issues.append(str(error)+'; using identified detail fields only')
+    volume = vol_table.rows if vol_table else {}
+    value = val_table.rows if val_table else {}
+    for kind,table in [('value',val_table),('volume',vol_table)]:
+        if table is None:
+            issues.append(f'Missing {kind} ownership table; dependent metrics remain blank')
     if set(volume) != set(value):
         issues.append(f'Volume/value symbol sets differ: {len(set(volume)-set(value))} only in volume, {len(set(value)-set(volume))} only in value')
-    keys = ('retail_buy','institutional_buy','retail_sell','institutional_sell')
-    for symbol, row in value.items():
-        v = volume.get(symbol)
-        if v is None:
-            continue
-        rb, ib, rs, ins = (row[k] for k in keys)
-        rbv, ibv, rsv, inv = (v[k] for k in keys)
-        turnover, quantity = rb + ib, rbv + ibv
-        if abs(turnover - rs - ins) > 1 or quantity != rsv + inv:
-            issues.append(f'Buy/sell mismatch: {symbol}')
-        records.append({'date': date, 'symbol': symbol, 'company': row['company'] or v['company'],
-                        'retail_buy_rial': rb, 'institutional_buy_rial': ib,
-                        'retail_sell_rial': rs, 'institutional_sell_rial': ins,
-                        'turnover_rial': turnover, 'volume': quantity,
-                        'retail_net_rial': rb-rs, 'institutional_net_rial': ib-ins,
-                        'retail_net_volume': rbv-rsv,
-                        'retail_buy_value_share': rb/turnover if turnover else 0,
-                        'retail_sell_value_share': rs/turnover if turnover else 0,
-                        'retail_flow_turnover_ratio': (rb-rs)/turnover if turnover else 0,
-                        'retail_buy_vwap_rial': rb/rbv if rbv else '',
-                        'retail_sell_vwap_rial': rs/rsv if rsv else '',
-                        'institutional_buy_vwap_rial': ib/ibv if ibv else '',
-                        'institutional_sell_vwap_rial': ins/inv if inv else ''})
-    for table in (vol_table, val_table):
-        if table.totals:
-            for key in keys:
-                actual = sum(r[key] for r in table.rows.values())
-                expected = table.totals[key]
-                tolerance = max(Decimal(1), abs(expected)*Decimal('1e-14')) if table.kind=='value' else Decimal(0)
-                if abs(actual-expected) > tolerance:
-                    issues.append(f'{table.name}: {key} footer mismatch: {actual} vs {expected}')
-    total = sum(r['turnover_rial'] for r in records)
-    net = sum(r['retail_net_rial'] for r in records)
-    # Excel cached totals have ~15 significant digits. Allow only the tiny
-    # rounding error at that precision, not a material reconciliation gap.
-    tolerance = max(Decimal(1), abs(source_turnover)*Decimal('1e-14'))
-    if abs(total-source_turnover) > tolerance:
-        issues.append(f'Turnover total mismatch: {total} vs {source_turnover}')
-    if sum(r['volume'] for r in records) != source_volume:
-        issues.append('Volume total mismatch')
-    positive = sum(r['retail_net_rial'] > 0 for r in records)
-    negative = sum(r['retail_net_rial'] < 0 for r in records)
-    ordered = sorted(records, key=lambda r: r['turnover_rial'], reverse=True)
-    daily = {'date': date, 'file': path.name, 'symbols': len(records),
-             'volume': source_volume, 'turnover_rial': total, 'retail_net_rial': net,
-             'retail_buy_value_share': sum(r['retail_buy_rial'] for r in records)/total if total else None,
-             'retail_sell_value_share': sum(r['retail_sell_rial'] for r in records)/total if total else None,
-             'summary_retail_buy_share': buy_share,
-             'summary_retail_sell_share': sell_share,
-             'retail_net_positive_symbols': positive, 'retail_net_negative_symbols': negative,
-             'retail_net_zero_symbols': len(records)-positive-negative,
-             'top10_turnover_share': sum(r['turnover_rial'] for r in ordered[:10])/total if total else None,
-             'normalizations': [*vol_table.notes, *val_table.notes],
-             'layouts': [vol_table.describe(), val_table.describe()],
-             'validation_issues': len(issues)}
+    records = []
+    for symbol in sorted(set(value) | set(volume)):
+        row, v = value.get(symbol, {}), volume.get(symbol, {})
+        value_valid, volume_valid = checked_row(row, 'value'), checked_row(v, 'volume')
+        row_issues = [*row.get('issues', []), *v.get('issues', [])]
+        for kind, cells, valid in [('value',row,value_valid), ('volume',v,volume_valid)]:
+            if not valid:
+                reason = ('buy/sell mismatch' if cells and not cells.get('ambiguous') and all(cells.get(k) is not None for k in KEYS)
+                          else 'missing or ambiguous fields')
+                message = f'{kind.capitalize()} {reason}: {symbol}; dependent metrics unavailable'
+                row_issues.append(message)
+                issues.append(message)
+        rb, ib, rs, ins = (row.get(k) for k in KEYS)
+        rbv, ibv, rsv, inv = (v.get(k) for k in KEYS)
+        turnover = rb+ib if value_valid else None
+        quantity = rbv+ibv if volume_valid else None
+        net = rb-rs if value_valid else None
+        records.append({'date':date, 'symbol':symbol, 'company':row.get('company') or v.get('company',''),
+            'retail_buy_rial':rb, 'institutional_buy_rial':ib,
+            'retail_sell_rial':rs, 'institutional_sell_rial':ins,
+            'turnover_rial':turnover, 'volume':quantity,
+            'retail_net_rial':net, 'institutional_net_rial':ib-ins if value_valid else None,
+            'retail_net_volume':rbv-rsv if volume_valid else None,
+            'retail_buy_value_share':rb/turnover if turnover else None,
+            'retail_sell_value_share':rs/turnover if turnover else None,
+            'retail_flow_turnover_ratio':net/turnover if turnover else None,
+            'retail_buy_vwap_rial':rb/rbv if value_valid and volume_valid and rbv else None,
+            'retail_sell_vwap_rial':rs/rsv if value_valid and volume_valid and rsv else None,
+            'institutional_buy_vwap_rial':ib/ibv if value_valid and volume_valid and ibv else None,
+            'institutional_sell_vwap_rial':ins/inv if value_valid and volume_valid and inv else None,
+            'source_data': {'value_sheet':val_table.name if val_table else None,
+                            'volume_sheet':vol_table.name if vol_table else None,
+                            'value_row':row.get('source_row'), 'volume_row':v.get('source_row'),
+                            'volume_amounts':{k:v.get(k) for k in KEYS},
+                            'value_amounts':{k:row.get(k) for k in KEYS},
+                            'value_valid':value_valid,'volume_valid':volume_valid,
+                            'issues':list(dict.fromkeys(row_issues))}})
+    vq = table_quality(val_table, source_turnover, issues)
+    qq = table_quality(vol_table, source_volume, issues)
+    if vq['complete'] and any(symbol not in value and any(row.get(k) is not None and row[k]>0 for k in KEYS)
+                              for symbol,row in volume.items()):
+        vq['complete'] = False
+        issues.append('Value table incomplete: traded symbols in volume have no value rows')
+    valid = [r for r in records if r['retail_net_rial'] is not None]
+    total = sum(r['turnover_rial'] for r in valid)
+    net = sum(r['retail_net_rial'] for r in valid)
+    positive = sum(r['retail_net_rial']>0 for r in valid)
+    negative = sum(r['retail_net_rial']<0 for r in valid)
+    ordered = sorted(valid,key=lambda r:r['turnover_rial'],reverse=True)
+    issues = list(dict.fromkeys(issues))
+    quality = {'value':vq, 'volume':qq, 'market_eligible':vq['complete'],
+               'symbol_eligible':bool(valid), 'retained_rows':len(records),
+               'unusable_value_rows':len(records)-len(valid),
+               'summary_disagrees':not vq.get('summary_matches',False) or not qq.get('summary_matches',False)}
+    daily = {'date':date,'file':path.name,'symbols':len(valid),
+        'volume':sum(r['volume'] for r in records if r['volume'] is not None) if qq['complete'] else None,
+        'turnover_rial':total,'retail_net_rial':net,
+        'source_summary_volume':source_volume,'source_summary_turnover_rial':source_turnover,
+        'retail_buy_value_share':sum(r['retail_buy_rial'] for r in valid)/total if total else None,
+        'retail_sell_value_share':sum(r['retail_sell_rial'] for r in valid)/total if total else None,
+        'summary_retail_buy_share':buy_share,'summary_retail_sell_share':sell_share,
+        'retail_net_positive_symbols':positive,'retail_net_negative_symbols':negative,
+        'retail_net_zero_symbols':len(valid)-positive-negative,
+        'top10_turnover_share':sum(r['turnover_rial'] for r in ordered[:10])/total if total else None,
+        'normalizations':[note for t in tables for note in t.notes],
+        'layouts':[t.describe() for t in tables], 'quality':quality,'validation_issues':len(issues)}
     return daily, records, issues
 
 
@@ -152,9 +213,9 @@ def main():
     for path in paths:
         try:
             day, records, issues = analyze(path)
-            if not issues:
+            if day['quality']['market_eligible']:
                 days.append(day)
-                all_records.extend(records)
+            all_records.extend(r for r in records if r['retail_net_rial'] is not None)
             checks.append({'file': path.name, 'issues': issues})
         except Exception as error:
             checks.append({'file': path.name, 'error': str(error)})

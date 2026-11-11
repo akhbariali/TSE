@@ -14,12 +14,21 @@ def audit(db, before=None):
     normalized = reversed_order = secondary = 0
     old = {r['sha']: r['state'] for r in before or []}
     versions = Counter()
+    usage = Counter()
     for row in db.execute('SELECT sha,state,error,issues,daily,parser_version FROM workbooks'):
         counts[row['state']] += 1
         versions[row['parser_version']] += 1
         if row['sha'] in old:
             transitions[old[row['sha']]+' -> '+row['state']] += 1
         day = json.loads(row['daily'] or '{}')
+        quality = day.get('quality', {})
+        if quality.get('market_eligible'):
+            usage['market_eligible_workbooks'] += 1
+            if row['state']=='warning':usage['warning_workbooks_with_complete_value_tables'] += 1
+        elif quality.get('symbol_eligible'):
+            usage['partial_workbooks_with_checked_value_rows'] += 1
+        elif quality.get('retained_rows'):
+            usage['workbooks_with_fields_only'] += 1
         notes = day.get('normalizations', [])
         normalized += bool(notes)
         secondary += any('secondary rows' in note for note in notes)
@@ -36,7 +45,11 @@ def audit(db, before=None):
             'institutional_first_workbooks': reversed_order,
             'workbooks_with_secondary_rows_excluded': secondary,
             'issue_occurrences': dict(issues), 'state_transitions': dict(transitions),
-            'active_dates': db.execute('SELECT COUNT(*) FROM active_reports').fetchone()[0]}
+            'usability': dict(usage),
+            'active_dates': db.execute('SELECT COUNT(*) FROM active_reports').fetchone()[0],
+            'symbol_analysis_dates': db.execute('SELECT COUNT(*) FROM symbol_reports').fetchone()[0],
+            'retained_instrument_rows': db.execute('SELECT COUNT(*) FROM flows').fetchone()[0],
+            'checked_value_rows': db.execute('SELECT COUNT(*) FROM flows WHERE retail_net_rial IS NOT NULL').fetchone()[0]}
 
 
 def main():
