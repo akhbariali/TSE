@@ -226,3 +226,21 @@ dig @ns1.parspack.co talebidir.shop SOA +norecurse
 ```
 
 The first two should return status NOERROR and A address `94.184.25.127`. At setup, both returned SERVFAIL and direct authoritative queries returned REFUSED. That indicates a DNS service/delegation problem rather than an application or browser problem. The `.shop` registry delegates this domain to `ns1.parspack.co` through `ns4.parspack.co`. Compare these with the exact nameservers assigned to this domain by the ParsPack CDN dashboard; change registrar delegation if they differ. If they match, ask ParsPack to activate/repair the DNS zone and include the authoritative REFUSED responses. Confirm the saved `tse` A record is DNS-only, points to the server, and has no conflicting CNAME/AAAA record. The private dashboard requires your account session and cannot be inspected through a public URL alone.
+
+### Nameserver correction on 13 November 2026
+
+Inspection of the signed-in ParsPack CDN overview confirmed that this zone is assigned to **rain.parspack.net** and **savanna.parspack.net**, rather than the registrar's old `ns1.parspack.co`–`ns4.parspack.co` delegation. Both assigned servers authoritatively return `tse.talebidir.shop A 94.184.25.127`. The registrar settings were changed to NS1 `rain.parspack.net`, NS2 `savanna.parspack.net`, with NS3/NS4 cleared; the values were confirmed after reloading the registrar page. Existing CDN records were retained.
+
+At verification time, the `.shop` registry still returned the old nameservers, so public resolution and certificate issuance remained pending propagation. ParsPack advises allowing up to 24 hours for nameserver changes. The server's existing HTTPS timer will complete certificate setup once public DNS is healthy. Check delegation directly with `dig @a.gmoregistry.net talebidir.shop NS +norecurse` and public resolution with `dig @1.1.1.1 tse.talebidir.shop A`.
+
+### Docker and the 24-hour DNS follow-up
+
+Docker Engine, Compose, and Buildx are installed from Docker's official Debian apt repository on the server and Docker starts on boot. The market archive continues to run under `tse.service`; Docker is available for additional services. Inspect it with `docker version`, `docker compose version`, and `systemctl status docker`.
+
+Nginx configuration lives in `/etc/nginx/sites-available/tse`, enabled through `/etc/nginx/sites-enabled/tse`. Global configuration is `/etc/nginx/nginx.conf`; additional services can use separate site files.
+
+A one-time, persistent systemd timer, `tse-dns-followup.timer`, is scheduled 24 hours after setup. It invokes `/usr/local/bin/tse-dns-followup`, checks trusted HTTPS, retries the existing certificate setup when needed, and records public/authoritative DNS diagnostics in `/var/log/tse-dns-followup.log`. This is server-side automation, not a ChatGPT notification. The existing `tse-https.timer` still retries every 15 minutes while certificate setup is pending.
+
+```bash
+ssh root@94.184.25.127 'systemctl list-timers tse-dns-followup.timer; cat /var/log/tse-dns-followup.log'
+```
