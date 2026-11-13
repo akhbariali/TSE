@@ -59,9 +59,63 @@ def numeric(row, col):
     return Decimal(row.get(col, '0'))
 
 
+def normalized(text):
+    return str(text).replace('ي', 'ی').replace('ك', 'ک').replace('\u200c', '').strip()
+
+
 def table(rows):
-    return {row['B']: row for row in rows.values()
-            if row.get('A', '').isdigit() and row.get('B') and row.get('C')}
+    """Resolve columns from the two-level headings, including shifted layouts."""
+    columns = None
+    for index, header in rows.items():
+        symbol = next((c for c, text in header.items() if normalized(text) == 'نماد'), None)
+        company = next((c for c, text in header.items() if 'نام شرکت' in normalized(text)), None)
+        if not symbol or not company:
+            continue
+        groups = sorted(header, key=lambda c: (len(c), c))
+        sub = rows.get(index+1, {})
+        found = {}
+        for i, col in enumerate(groups):
+            label = normalized(header[col])
+            if 'درصد' in label or not ('خرید' in label or 'فروش' in label):
+                continue
+            stop = groups[i+1] if i+1 < len(groups) else 'ZZZ'
+            for c, text in sub.items():
+                if (len(col),col) <= (len(c),c) < (len(stop),stop):
+                    category = normalized(text)
+                    if category in ('حقیقی', 'حقوقی'):
+                        found[('خرید' if 'خرید' in label else 'فروش', category)] = c
+        keys = [('خرید','حقیقی'),('خرید','حقوقی'),('فروش','حقیقی'),('فروش','حقوقی')]
+        if all(k in found for k in keys):
+            columns = [symbol, company, *[found[k] for k in keys]]
+            break
+    if columns is None:
+        raise ValueError('Ownership table headings could not be resolved safely')
+    result = {}
+    duplicates = set()
+    for row in rows.values():
+        symbol = row.get(columns[0])
+        if not symbol or not row.get(columns[1]) or not any(str(v).isdigit() for c,v in row.items() if c not in columns):
+            continue
+        if symbol in result:
+            duplicates.add(symbol)
+        result[symbol] = {key: row.get(col) for key,col in zip(['B','C','D','E','H','I'], columns)}
+    for symbol in duplicates:
+        result[symbol]['D'] = None  # Ambiguous duplicates must not overwrite silently.
+    return result
+
+
+def checked_values(row, volume=False):
+    if row is None:
+        raise ValueError('missing row')
+    values = tuple(Decimal(row[c]) for c in ['D','E','H','I'])
+    if any(not v.is_finite() or v < 0 for v in values):
+        raise ValueError('negative or non-finite amount')
+    if volume and any(v != v.to_integral_value() for v in values):
+        raise ValueError('non-integer volume')
+    tolerance = Decimal(0) if volume else max(Decimal(1), sum(values)*Decimal('1e-14'))
+    if abs(values[0]+values[1]-values[2]-values[3]) > tolerance:
+        raise ValueError('buy/sell amounts do not reconcile')
+    return values
 
 
 def report_date(summary, path):
@@ -123,21 +177,31 @@ def analyze(path):
     issues = []
     if set(volume) != set(value):
         issues.append('Volume/value symbol sets differ')
+    excluded = []
+    missing_volume = []
     for symbol, row in value.items():
-        v = volume.get(symbol)
-        if v is None:
+        try:
+            rb, ib, rs, ins = checked_values(row)
+        except Exception as exc:
+            excluded.append({'symbol': symbol, 'reason': str(exc)})
             continue
-        rb, ib, rs, ins = (numeric(row, c) for c in ['D', 'E', 'H', 'I'])
-        rbv, ibv, rsv, inv = (numeric(v, c) for c in ['D', 'E', 'H', 'I'])
-        turnover, quantity = rb + ib, rbv + ibv
-        if abs(turnover - rs - ins) > 1 or quantity != rsv + inv:
-            issues.append(f'Buy/sell mismatch: {symbol}')
+        try:
+            rbv, ibv, rsv, inv = checked_values(volume.get(symbol), volume=True)
+        except Exception:
+            rbv = ibv = rsv = inv = None
+            missing_volume.append(symbol)
+        # A copied volume row can balance perfectly while being invalid value data.
+        if rbv is not None and (rb, ib, rs, ins) == (rbv, ibv, rsv, inv) and rb+ib > 0:
+            excluded.append({'symbol': symbol, 'reason': 'Value amounts exactly duplicate volume amounts'})
+            continue
+        turnover = rb + ib
+        quantity = rbv + ibv if rbv is not None else None
         records.append({'date': date, 'symbol': symbol, 'company': row['C'],
                         'retail_buy_rial': rb, 'institutional_buy_rial': ib,
                         'retail_sell_rial': rs, 'institutional_sell_rial': ins,
                         'turnover_rial': turnover, 'volume': quantity,
                         'retail_net_rial': rb-rs, 'institutional_net_rial': ib-ins,
-                        'retail_net_volume': rbv-rsv,
+                        'retail_net_volume': rbv-rsv if rbv is not None else None,
                         'retail_buy_value_share': rb/turnover if turnover else 0,
                         'retail_sell_value_share': rs/turnover if turnover else 0,
                         'retail_flow_turnover_ratio': (rb-rs)/turnover if turnover else 0,
@@ -145,6 +209,11 @@ def analyze(path):
                         'retail_sell_vwap_rial': rs/rsv if rsv else '',
                         'institutional_buy_vwap_rial': ib/ibv if ibv else '',
                         'institutional_sell_vwap_rial': ins/inv if inv else ''})
+    if excluded:
+        issues.append(f'Excluded {len(excluded)} invalid or suspect value rows')
+        issues.extend(f"Excluded {r['symbol']}: {r['reason']}" for r in excluded)
+    if missing_volume:
+        issues.append(f'Volume unavailable for {len(missing_volume)} retained value rows: '+', '.join(missing_volume))
     total = sum(r['turnover_rial'] for r in records)
     net = sum(r['retail_net_rial'] for r in records)
     # Excel cached totals have ~15 significant digits. Allow only the tiny
@@ -152,13 +221,13 @@ def analyze(path):
     tolerance = max(Decimal(1), abs(source_turnover)*Decimal('1e-14'))
     if abs(total-source_turnover) > tolerance:
         issues.append(f'Turnover total mismatch: {total} vs {source_turnover}')
-    if sum(r['volume'] for r in records) != source_volume:
+    if sum(r['volume'] or 0 for r in records) != source_volume:
         issues.append('Volume total mismatch')
     positive = sum(r['retail_net_rial'] > 0 for r in records)
     negative = sum(r['retail_net_rial'] < 0 for r in records)
     ordered = sorted(records, key=lambda r: r['turnover_rial'], reverse=True)
     daily = {'date': date, 'file': path.name, 'symbols': len(records),
-             'volume': source_volume, 'turnover_rial': total, 'retail_net_rial': net,
+             'volume': sum(r['volume'] or 0 for r in records), 'turnover_rial': total, 'retail_net_rial': net,
              'retail_buy_value_share': sum(r['retail_buy_rial'] for r in records)/total if total else None,
              'retail_sell_value_share': sum(r['retail_sell_rial'] for r in records)/total if total else None,
              'summary_retail_buy_share': buy_share,
@@ -166,7 +235,10 @@ def analyze(path):
              'retail_net_positive_symbols': positive, 'retail_net_negative_symbols': negative,
              'retail_net_zero_symbols': len(records)-positive-negative,
              'top10_turnover_share': sum(r['turnover_rial'] for r in ordered[:10])/total if total else None,
-             'validation_issues': len(issues)}
+             'validation_issues': len(issues), 'partial': bool(issues),
+             'source_turnover_rial': source_turnover, 'source_volume': source_volume,
+             'excluded_rows': excluded, 'volume_unavailable_symbols': missing_volume,
+             'volume_only_symbols': sorted(set(volume)-set(value))}
     return daily, records, issues
 
 

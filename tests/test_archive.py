@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 import download_reports as download
 from analyze_reports import analyze, report_date, summary_values
 import app
+import index_reports as index
 
 
 def payload(text):
@@ -117,6 +118,33 @@ class ParsingTests(unittest.TestCase):
         rows={14:{'D':'حجم كل معاملات','F':'ارزش كل معاملات'},15:{'D':'12','F':'120'}}
         self.assertEqual(summary_values(rows),(Decimal(12),Decimal(120),None,None))
 
+    def test_partial_rows_and_shifted_columns(self):
+        def sheet(rows, shifted=False):
+            headers={3:{'A':'ردیف','B':'نماد','C':'نام شركت','D':'ارزش خرید مقدار','F':'ارزش خرید درصد','H':'ارزش فروش مقدار','J':'ارزش فروش درصد'},
+                     4:{'D':'حقيقي','E':'حقوقي','H':'حقيقي','I':'حقوقي'}}
+            for n,(symbol,values) in enumerate(rows,5):
+                headers[n]={'A':str(n-4),'B':symbol,'C':'Company',**dict(zip(['D','E','H','I'],values))}
+            if shifted:
+                headers={n:{chr(ord(c)+1):v for c,v in row.items()} for n,row in headers.items()}
+            return headers
+        values=sheet([('good',['100','200','150','150']),('bad',['100','20','10','10']),
+                      ('no-volume',['80','20','50','50']),('copied',['10','20','15','15'])],True)
+        volumes=sheet([('good',['10','20','15','15']),('bad',['10','2','1','11']),
+                       ('copied',['10','20','15','15'])])
+        sheets={'خلاصه بازار':{7:{'F':'1405/03/19'},10:{'D':'حجم كل معاملات','F':'ارزش كل معاملات'},11:{'D':'100','F':'1000'}},
+                'تغییر مالکیت براساس ارزش':values,'تغییر مالکیت براساس حجم':volumes}
+        with patch('analyze_reports.workbook',return_value=sheets):
+            day,records,issues=analyze(Path('test.xlsx'))
+        by_symbol={r['symbol']:r for r in records}
+        self.assertEqual(set(by_symbol),{'good','no-volume'})
+        self.assertEqual(day['turnover_rial'],400)
+        self.assertEqual(day['volume'],30)
+        self.assertTrue(day['partial'])
+        self.assertIsNone(by_symbol['no-volume']['volume'])
+        self.assertEqual(by_symbol['no-volume']['retail_buy_vwap_rial'],'')
+        self.assertEqual(len(day['excluded_rows']),2)
+        self.assertTrue(issues)
+
     def test_known_workbook_reconciles_with_verified_figures(self):
         source=ROOT/'KH - 14050819.xlsx'
         if not source.exists():self.skipTest('Source fixture is not available')
@@ -128,15 +156,32 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(issues,[])
 
 
+class RecoveryIndexTests(unittest.TestCase):
+    def test_partial_reports_enter_analysis_and_validated_revision_wins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'archive.sqlite3'
+            original_connect=index.connect
+            with patch.object(index,'DB',path), patch.object(index,'connect',lambda: original_connect(path)):
+                index.init_db()
+                with index.connect() as db:
+                    db.executemany('INSERT INTO workbooks (sha,file,date,state,published_at,report_id) VALUES (?,?,?,?,?,?)',[
+                        ('old','old.xlsx','1405/03/19','ready','2026-06-10',1),
+                        ('new','new.xlsx','1405/03/19','partial','2026-06-11',2),
+                        ('partial','partial.xlsx','1405/03/20','partial','2026-06-12',3),
+                        ('bad','bad.xlsx','1405/03/21','unsupported','2026-06-13',4)])
+                    self.assertEqual([r['sha'] for r in db.execute('SELECT sha FROM active_reports ORDER BY date')],['old','partial'])
+                index.init_db()  # Existing databases also migrate idempotently.
+
+
 class QueryTests(unittest.TestCase):
     def setUp(self):
         self.db=sqlite3.connect(':memory:');self.db.row_factory=sqlite3.Row
-        self.db.executescript('''CREATE TABLE active_reports (sha,date,daily,published_at,report_id);
+        self.db.executescript('''CREATE TABLE active_reports (sha,date,daily,published_at,report_id,state);
           CREATE TABLE flows(workbook_sha,symbol,company,search_text,turnover_rial,retail_net_rial,
-                             retail_buy_rial,retail_sell_rial);''')
+                             retail_buy_rial,retail_sell_rial,volume REAL);''')
         for n in range(1,4):
-            self.db.execute('INSERT INTO active_reports VALUES (?,?,?,?,?)',(str(n),f'1405/08/{n:02}', '{}','2026-11-10',n))
-            self.db.execute('INSERT INTO flows VALUES (?,?,?,?,?,?,?,?)',(str(n),'وبملت1','بانک ملت','وبملت1بانکملت',100,n*10,50+n*10,50))
+            self.db.execute('INSERT INTO active_reports VALUES (?,?,?,?,?,?)',(str(n),f'1405/08/{n:02}', '{}','2026-11-10',n,'ready'))
+            self.db.execute('INSERT INTO flows VALUES (?,?,?,?,?,?,?,?,?)',(str(n),'وبملت1','بانک ملت','وبملت1بانکملت',100,n*10,50+n*10,50,n*10))
 
     def tearDown(self):self.db.close()
 
@@ -148,6 +193,17 @@ class QueryTests(unittest.TestCase):
         self.assertEqual(result,app.flow_query(self.db,{'window':'2'},export=True))
         result=app.flow_query(self.db,{'start':'1405/08/01','end':'1405/08/01'})
         self.assertEqual(result['items'][0]['net_rial'],10)
+
+    def test_average_price_is_volume_weighted_and_missing_without_volume(self):
+        result=app.flow_query(self.db,{'window':'2'})
+        self.assertAlmostEqual(result['items'][0]['average_price_rial'],200/50)
+        detail=app.symbol_detail(self.db,{'window':'all','symbol':'وبملت1'})
+        self.assertEqual(detail['days'][0]['average_price_rial'],10)
+        self.db.execute("UPDATE flows SET volume=NULL WHERE workbook_sha='1'")
+        self.assertEqual(app.flow_query(self.db,{'window':'all'})['items'][0]['average_price_rial'],4)
+        self.db.execute('UPDATE flows SET volume=0')
+        self.assertIsNone(app.flow_query(self.db,{'window':'all'})['items'][0]['average_price_rial'])
+        self.assertIsNone(app.symbol_detail(self.db,{'window':'all','symbol':'وبملت1'})['days'][0]['average_price_rial'])
 
     def test_search_is_literal_and_normalizes_persian_variants(self):
         self.assertEqual(app.flow_query(self.db,{'window':'all','q':'بانك ملت'})['total'],1)

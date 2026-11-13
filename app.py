@@ -91,7 +91,7 @@ def status(db):
     catalog = read_json(ROOT / 'data/report-catalog.json', {})
     manifest = read_json(ROOT / 'data/download-manifest.json', [])
     count = dict(db.execute('''SELECT COUNT(*) AS indexed,
-              SUM(state='ready') AS ready, SUM(state='warning') AS warning,
+              SUM(state='ready') AS ready, SUM(state IN ('warning','partial')) AS warning, SUM(state='partial') AS partial,
               SUM(state='unsupported') AS unsupported FROM workbooks''').fetchone())
     active = dict(db.execute('SELECT COUNT(*) AS reports, MIN(date) AS first_date, MAX(date) AS last_date FROM active_reports').fetchone())
     with SYNC_LOCK:
@@ -136,8 +136,9 @@ def flow_query(db, query, export=False):
                'turnover': 'turnover_rial DESC', 'ratio': 'flow_ratio DESC',
                'persistence': 'positive_days*1.0/observed_days DESC,net_rial DESC'}
     order = sorting.get(query.get('sort', 'net_desc'), 'net_rial DESC')
-    sql = f'''SELECT f.symbol, MAX(f.company) AS company, COUNT(*) AS observed_days,
+    sql = f'''SELECT f.symbol, MAX(f.company) AS company, COUNT(*) AS observed_days, SUM(a.state='partial') AS partial_days,
                 SUM(f.turnover_rial) AS turnover_rial, SUM(f.retail_net_rial) AS net_rial,
+                SUM(CASE WHEN f.volume>0 THEN f.turnover_rial END)/NULLIF(SUM(CASE WHEN f.volume>0 THEN f.volume END),0) AS average_price_rial,
                 SUM(f.retail_buy_rial) AS buy_rial, SUM(f.retail_sell_rial) AS sell_rial,
                 SUM(f.retail_net_rial>0) AS positive_days, SUM(f.retail_net_rial<0) AS negative_days,
                 SUM(f.retail_net_rial)/NULLIF(SUM(f.turnover_rial),0) AS flow_ratio
@@ -165,7 +166,7 @@ def reports(db, query):
         if value:
             clause += f' AND date{operator}?'
             params.append(value)
-    if query.get('state') in ('ready', 'warning', 'unsupported'):
+    if query.get('state') in ('ready', 'partial', 'warning', 'unsupported'):
         clause += ' AND state=?'
         params.append(query['state'])
     total = db.execute('SELECT COUNT(*) FROM workbooks WHERE '+clause, params).fetchone()[0]
@@ -181,7 +182,8 @@ def symbol_detail(db, query):
     if not symbol:
         raise ValueError('Choose a symbol.')
     clause, params, selected = scope_clause(db, query)
-    data = rows(db, f'''SELECT a.date,a.sha,a.published_at,f.* FROM flows f
+    data = rows(db, f'''SELECT a.date,a.sha,a.published_at,a.state AS report_state,f.*,
+                        f.turnover_rial/NULLIF(f.volume,0) AS average_price_rial FROM flows f
                         JOIN active_reports a ON a.sha=f.workbook_sha
                         WHERE {clause} AND f.symbol=? ORDER BY a.date''', [*params, symbol])
     return {'symbol': symbol, 'company': data[-1]['company'] if data else '',

@@ -16,7 +16,7 @@ from analyze_reports import analyze
 from download_reports import ROOT, atomic_json, read_json
 
 DB = ROOT / 'data/archive.sqlite3'
-PARSER_VERSION = 3
+PARSER_VERSION = 4
 
 
 def connect(path=DB):
@@ -49,11 +49,12 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS flows_symbol ON flows(symbol);
         CREATE INDEX IF NOT EXISTS workbooks_date ON workbooks(date);
-        CREATE VIEW IF NOT EXISTS active_reports AS
+        DROP VIEW IF EXISTS active_reports;
+        CREATE VIEW active_reports AS
           SELECT * FROM (
             SELECT *, ROW_NUMBER() OVER (
-              PARTITION BY date ORDER BY COALESCE(published_at,'') DESC, report_id DESC, sha
-            ) AS revision_rank FROM workbooks WHERE state='ready'
+              PARTITION BY date ORDER BY (state='ready') DESC, COALESCE(published_at,'') DESC, report_id DESC, sha
+            ) AS revision_rank FROM workbooks WHERE state IN ('ready','partial')
           ) WHERE revision_rank=1;
         ''')
 
@@ -81,7 +82,7 @@ def ingest(entry, retry=False):
         day, records, issues = analyze(path)
         if not records:
             raise ValueError('No instrument rows found in this workbook layout')
-        state = 'warning' if issues else 'ready'
+        state = 'partial' if issues else 'ready'
     except Exception as exc:
         state, error = 'unsupported', f'{type(exc).__name__}: {exc}'
     meta = dict(sha=digest, file=entry['file'], source_name=entry.get('source_name', path.name),
@@ -102,7 +103,7 @@ def ingest(entry, retry=False):
         db.execute(f'INSERT INTO workbooks ({",".join(columns)}) VALUES ({",".join("?" for _ in columns)})', list(meta.values()))
         db.executemany(f'INSERT INTO flows VALUES ({",".join("?" for _ in range(4+len(flow_keys)))})',
                        [(digest, r['symbol'], r['company'], normalize(r['symbol']+' '+r['company']),
-                         *[float(r[k]) if r[k] != '' else None for k in flow_keys]) for r in records])
+                         *[float(r[k]) if r[k] not in ('', None) else None for k in flow_keys]) for r in records])
     print(f"{state}: {path.name} ({len(records)} rows){': '+error if error else ''}", flush=True)
     return True
 

@@ -40,7 +40,7 @@ The current source category exposed **802 report entries across 41 pages**, with
 - Latest 5/20/60 reports, full validated history, or custom Solar Hijri date ranges.
 - Pointer or keyboard report inspection, ownership-flow breadth, and original workbook download.
 - Symbol/company search, direction and minimum-turnover filters, sortable rankings, and pagination.
-- Net transfers, transfer-to-turnover ratios, observed-day buying persistence, and symbol history with investor-category purchase VWAPs.
+- Net transfers, transfer-to-turnover ratios, observed-day buying persistence, and symbol history with average traded prices and investor-category purchase VWAPs. Average price (rial) is trading value divided by volume, weighted by volume across the selected period in rankings; it is not a closing or live price. Zero-volume prices are unavailable.
 - Searchable report library with original Excel downloads, publication dates, TSE source links, file sizes, and validation/revision status.
 - CSV exports that respect the selected dates and symbol-table filters. Amount fields ending in `_rial` use rials, not the trillion-toman display unit.
 - Archive progress and data methodology, with explicit analysis exclusions.
@@ -49,11 +49,11 @@ The interface currently uses English, with Persian source labels/symbols retaine
 
 ## Data quality and interpretation
 
-After historical-layout/date normalization, **345 workbooks pass the accounting checks; 443 have warnings; 6 are not fully supported**. Warning/unsupported files stay downloadable and searchable, but do not enter chart aggregates. Historical examples include mismatched value/volume symbol sets, source totals that do not reconcile with detailed rows, and monthly report layouts outside the daily parser. Review the exact issue in the library before relying on a file.
+After parser version 4 recovery, the local archive has **304 fully validated workbooks, 487 partial workbooks, and 3 unsupported workbooks** (794 distinct workbook contents). The parser now retains usable value rows in partial reports. Partial reports enter analytics with explicit coverage warnings; unsupported files remain downloadable and searchable. Historical examples include mismatched value/volume symbol sets, source totals that do not reconcile with detailed rows, and monthly report layouts outside the daily parser. Review the exact issue in the library before relying on a file.
 
 Dates are normalized from compact, slash-separated, dash-separated, and Persian-digit formats. Shifted daily summary rows are located by labels. Very small total discrepancies consistent with Excel's approximately 15-digit cached numeric precision are tolerated (maximum of 1 rial and `abs(source_total) × 10^-14`); material differences remain warnings. Missing summary percentages remain null and are not fabricated.
 
-One validated revision per report date enters analytics; alternate revisions remain in the library. Hidden duplicate sheets are excluded. Exact symbol suffixes and names are not merged, and missing observations are not assumed to be zero. Database chart values use floating-point numbers after Decimal-based source checks; original workbooks retain the full stored precision.
+One revision per report date enters analytics, preferring fully validated reports over partial reports; alternate revisions remain in the library. Hidden duplicate sheets are excluded. Exact symbol suffixes and names are not merged, and missing observations are not assumed to be zero. Database chart values use floating-point numbers after Decimal-based source checks; original workbooks retain the full stored precision.
 
 Net individual purchases measure an ownership transfer, not new cash entering the exchange or a return forecast. The detailed tables contain mixed instrument types. Their aggregate values are not equity-only totals, and the narrower summary percentages must not be applied to the full detailed-table total. Investor counts, closing-price returns, sector maps, and valuation histories require additional sources.
 
@@ -90,3 +90,34 @@ node --check web/static/app.js
 ```
 
 The regression suite covers multipage discovery, duplicate attachments/content, filename revisions, preserving previous downloads on a limited run, retrying failures, repairing damaged files, historical date formats/shifted summaries, known sample figures, and consistent date filtering/search/export queries. Browser checks cover desktop/mobile layout, report pagination, symbol search/history, all chart modes, custom/empty dates, filtered downloads, and server-error handling.
+
+### Partial report recovery
+
+Parser version 4 resolves ownership columns from their two-level Persian headings, including shifted columns. Value rows require finite nonnegative amounts and balanced purchase/sale totals. Invalid or ambiguous duplicate value rows are excluded. Missing or invalid volume leaves volume-derived fields and prices unavailable while retaining valid value flows. Value rows that exactly copy their nonzero volume amounts are treated as suspect and excluded.
+
+Partial reports retain published totals, reconciliation gaps, excluded symbol/reason pairs, and missing-volume symbols. The report library exposes extraction details. Charts and exports use retained rows only; partial totals are incomplete market coverage. Period average prices use only observations with valid positive volume. Original files are preserved. Changing the parser version causes the indexer to reprocess cached workbooks on its next start.
+
+## Routine archive updates and recovery
+
+Use **Update archive** in the app, or run:
+
+```bash
+python3 scripts/sync_archive.py
+```
+
+Every newly downloaded or revised workbook automatically goes through the same extraction, column detection, accounting checks, and partial-row recovery described above. This applies to all files in the download manifest, without a separate manual cleanup step. Existing unchanged workbooks already indexed by the current parser are reused. With the app running, its watch indexer handles new files; the sync command may report that another indexer owns the lock, which is expected.
+
+After updating, wait for indexing to finish and review **Report library → Partial · retained valid rows → Extraction details**. Check excluded symbols and reconciliation gaps before using partial totals. Original workbooks remain untouched.
+
+When improving extraction rules, increment `PARSER_VERSION` in `scripts/index_reports.py`, stop the app to release its indexer lock, then run:
+
+```bash
+python3 scripts/index_reports.py
+python3 app.py --port 8000
+```
+
+The version change reprocesses **every workbook**, including previously validated files. To retry only partial/warning/unsupported workbooks without a version change, stop the app and run `python3 scripts/index_reports.py --retry-errors`, then restart the app. Never remove the database or original downloads to force a retry. Run the verification commands above after parser changes.
+
+In symbol history, choose **Average price** to chart daily traded value ÷ volume in rials. Unavailable prices appear as gaps; hover points for dates and prices. The selected report window applies to both the chart and table.
+
+Symbol history defaults to **Both**: net-transfer bars on the left scale (trillion toman) and a blue average-price line on the right scale (rials). Hover a date for both values. Missing prices leave gaps while net-transfer bars remain visible. Each series uses its own scale.
