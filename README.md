@@ -233,14 +233,10 @@ Inspection of the signed-in ParsPack CDN overview confirmed that this zone is as
 
 At verification time, the `.shop` registry still returned the old nameservers, so public resolution and certificate issuance remained pending propagation. ParsPack advises allowing up to 24 hours for nameserver changes. The server's existing HTTPS timer will complete certificate setup once public DNS is healthy. Check delegation directly with `dig @a.gmoregistry.net talebidir.shop NS +norecurse` and public resolution with `dig @1.1.1.1 tse.talebidir.shop A`.
 
-### Docker and the 24-hour DNS follow-up
+### Docker
 
 Docker Engine, Compose, and Buildx are installed from Docker's official Debian apt repository on the server and Docker starts on boot. The market archive continues to run under `tse.service`; Docker is available for additional services. Inspect it with `docker version`, `docker compose version`, and `systemctl status docker`.
 
 Nginx configuration lives in `/etc/nginx/sites-available/tse`, enabled through `/etc/nginx/sites-enabled/tse`. Global configuration is `/etc/nginx/nginx.conf`; additional services can use separate site files.
 
-A one-time, persistent systemd timer, `tse-dns-followup.timer`, is scheduled 24 hours after setup. It invokes `/usr/local/bin/tse-dns-followup`, checks trusted HTTPS, retries the existing certificate setup when needed, and records public/authoritative DNS diagnostics in `/var/log/tse-dns-followup.log`. This is server-side automation, not a ChatGPT notification. The existing `tse-https.timer` still retries every 15 minutes while certificate setup is pending.
-
-```bash
-ssh root@94.184.25.127 'systemctl list-timers tse-dns-followup.timer; cat /var/log/tse-dns-followup.log'
-```
+The server-side 24-hour follow-up and its log were removed at the user’s request. The existing `tse-https.timer` continues checking DNS and certificate readiness every 15 minutes; ChatGPT reminders are managed separately.
