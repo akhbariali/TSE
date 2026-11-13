@@ -1,0 +1,9 @@
+[Unit]
+Description=Enable TSE HTTPS once public DNS is ready
+After=network-online.target nginx.service tse.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tse-enable-https
+TimeoutStartSec=300

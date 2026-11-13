@@ -1,0 +1,27 @@
+[Unit]
+Description=TSE and IFB market archive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tse
+Group=tse
+WorkingDirectory=/opt/tse
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/etc/tse.env
+ExecStart=/usr/bin/python3 /opt/tse/app.py --host ${TSE_HOST} --port ${TSE_PORT}
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/tse/data
+
+[Install]
+WantedBy=multi-user.target

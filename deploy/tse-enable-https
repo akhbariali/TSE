@@ -1,0 +1,36 @@
+#!/bin/sh
+# Complete HTTPS only after public DNS points to this server.
+set -eu
+tse_domain=tse.talebidir.shop
+tse_ip=94.184.25.127
+exec 9>/run/lock/tse-https.lock
+flock -n 9 || exit 0
+for tse_resolver in 1.1.1.1 8.8.8.8; do
+    tse_answers=$(dig @"$tse_resolver" "$tse_domain" A +short +time=4 +tries=1)
+    if [ "$tse_answers" != "$tse_ip" ]; then
+        echo "Waiting for public A record: $tse_domain -> $tse_ip (resolver $tse_resolver)."
+        exit 0
+    fi
+    tse_ipv6=$(dig @"$tse_resolver" "$tse_domain" AAAA +short +time=4 +tries=1)
+    if [ -n "$tse_ipv6" ]; then
+        echo 'Unexpected IPv6/CNAME response; verify AAAA records before issuing the certificate.'
+        exit 0
+    fi
+done
+certbot --nginx --non-interactive --agree-tos --register-unsafely-without-email \
+    --redirect --cert-name "$tse_domain" -d "$tse_domain"
+nginx -t
+# Validate the real certificate and application before closing public port 8000.
+curl -fsS --resolve "$tse_domain:443:127.0.0.1" "https://$tse_domain/healthz" >/dev/null
+sed -i 's/^TSE_HOST=.*/TSE_HOST=127.0.0.1/' /etc/tse.env
+systemctl restart tse
+for tse_attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -fsS "https://$tse_domain/healthz" >/dev/null 2>&1; then
+        systemctl disable --now tse-https.timer
+        echo "HTTPS ready: https://$tse_domain; application port is loopback-only."
+        exit 0
+    fi
+    sleep 1
+done
+echo 'HTTPS health check failed after restart; inspect journalctl -u tse -u nginx.' >&2
+exit 1

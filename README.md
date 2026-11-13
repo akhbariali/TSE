@@ -1,17 +1,18 @@
 # TSE Market Archive
 
-A local web app for browsing Tehran Securities Exchange market-performance workbooks and exploring individual/institutional ownership flows. **No login, API key, or external service is required.** The application uses Python 3.10+ and its standard library, with SQLite for incremental storage. The downloader's process locks use `fcntl` (Linux/macOS).
+A local web app for browsing Tehran Securities Exchange market-performance workbooks and exploring individual/institutional ownership flows. **One username/password protects the web app.** No API key or external authentication service is required. The application uses Python 3.10+ and its standard library, with SQLite for incremental storage. The downloader's process locks use `fcntl` (Linux/macOS).
 
 ## Run the app
 
 ```bash
 cd /path/to/TSE
+python3 scripts/configure_login.py --username admin
 python3 app.py --port 8000
 ```
 
 Open **http://127.0.0.1:8000**. The existing downloaded files and database are ready to use. The server starts a lightweight background indexer that notices new downloads; it does not automatically start a network download. The UI has no external font, chart-library, or CDN dependency.
 
-To listen on another interface, use `--host 0.0.0.0`. Access remains unauthenticated, including the archive-refresh action. Run it on the intended network. Deployment behind a reverse proxy is possible; this repository does not provision hosting.
+To listen on another interface, use `--host 0.0.0.0`. Pages, both market APIs, original downloads, exports, and archive refresh require a signed-in session. Use HTTPS for public access. Nginx deployment details are below.
 
 ## Download the entire archive
 
@@ -146,3 +147,82 @@ python3 scripts/ifb_archive.py --import-files /path/to/report.xlsx
 ```
 
 On every update, the IFB indexer checks cached files before downloading new ones. After changing IFB extraction rules, increment `PARSER_VERSION` in `scripts/ifb_archive.py`; the next update reprocesses all archived IFB workbooks. `--retry-errors` reprocesses cached workbooks without a version bump. Repeated downloads reuse report IDs and content hashes; revisions remain archived, and one ownership revision per date enters analytics. A dedicated IFB lock prevents concurrent update writers. Interrupted/failed downloads are retried on the next update. Review **IFB → Data & methodology** and the report library for coverage and exclusions.
+
+## Server deployment
+
+The app is deployed from Git branch **develop** to `/opt/tse` on `94.184.25.127`. Python 3 and its standard library are sufficient. The systemd service runs as the unprivileged `tse` user, starts on boot, and restarts on failure. Git code is managed by root; only `data/` is writable by the service. TSE and IFB databases and original workbooks remain outside Git under that directory.
+
+Current address: **http://94.184.25.127:8000**. The reverse proxy is deferred; ports 80/443 remain available for other services. Bind settings live in `/etc/tse.env`:
+
+```text
+TSE_HOST=0.0.0.0
+TSE_PORT=8000
+```
+
+After committing and pushing changes to `develop`, deploy with:
+
+```bash
+ssh root@94.184.25.127 tse-update
+```
+
+The update command fetches `origin/develop`, verifies a fast-forward, tests the incoming commit in a temporary directory, updates the checkout, restarts the service, and checks both market APIs. It preserves archived data and stops when tracked files have local edits. Configuration sources are in `deploy/tse.service`, `deploy/tse-update`, and `deploy/tse.env.example`; installed copies are `/etc/systemd/system/tse.service` and `/usr/local/bin/tse-update`. If those files change in Git, install the new copies explicitly and run `systemctl daemon-reload` before restarting.
+
+Useful server commands:
+
+```bash
+systemctl status tse
+journalctl -u tse -n 100 --no-pager
+systemctl restart tse
+git -C /opt/tse rev-parse --short HEAD
+```
+
+When the reverse proxy is added, change `TSE_HOST` to `127.0.0.1`, restart `tse`, and proxy the chosen domain to `127.0.0.1:8000`. The app requires a single-account login. Until HTTPS is active, use an SSH tunnel rather than submitting credentials over public HTTP. Back up each database through SQLite's backup API and retain the manifests and raw workbooks. Never copy a live database without its WAL state.
+
+### Nginx and HTTPS for tse.talebidir.shop
+
+Nginx now routes `tse.talebidir.shop` on port 80 to `127.0.0.1:8000`, preserving the original Host header for archive-refresh requests. Its site configuration is `/etc/nginx/sites-available/tse`; `deploy/tse.nginx.conf` is the HTTP bootstrap template. Certbot will extend the installed configuration with HTTPS and HTTP-to-HTTPS redirects; do not overwrite that generated configuration with the bootstrap template afterward.
+
+At setup time, public DNS returned `SERVFAIL` because the delegated ParsPack nameservers (`ns1.parspack.co` through `ns4.parspack.co`) refused queries. Nginx was verified with the domain's Host header, but a trusted certificate cannot be issued until public DNS works. Confirm the ParsPack domain/zone is activated and that the active DNS service's nameservers match those configured at the registrar. The A record must resolve to `94.184.25.127`; avoid an AAAA record unless IPv6 is configured on this server.
+
+`tse-https.timer` checks every 15 minutes. Once both Google and Cloudflare DNS return the server address, `/usr/local/bin/tse-enable-https` obtains a Let's Encrypt certificate, enables redirects, tests both market APIs, binds the application to loopback only, and disables the bootstrap timer. Existing access via port 8000 remains available until HTTPS succeeds. Certbot's separate `certbot.timer` handles certificate renewal afterward. Certificate registration currently has no notification email.
+
+To trigger setup immediately after fixing DNS:
+
+```bash
+ssh root@94.184.25.127 systemctl start tse-https.service
+ssh root@94.184.25.127 journalctl -u tse-https.service -n 30 --no-pager
+```
+
+Other future services can have their own Nginx `server_name` blocks on the same ports 80/443. This site's configuration does not claim those domains.
+
+## Single-account login
+
+Create or change credentials with `python3 scripts/configure_login.py --username admin`. The password is entered interactively, must have at least 12 characters, and is stored as a salted PBKDF2-SHA256 hash with 600,000 iterations. The default file is ignored by Git at `data/auth.json`; `TSE_AUTH_FILE` can override its location. The app refuses to start without valid credentials.
+
+The deployed service uses `/etc/tse-auth.json` (root-owned, group `tse`, mode 0640), configured in `/etc/tse.env`. To change the server account:
+
+```bash
+ssh -t root@94.184.25.127 'cd /opt/tse && python3 scripts/configure_login.py --username admin --output /etc/tse-auth.json && chown root:tse /etc/tse-auth.json && chmod 0640 /etc/tse-auth.json && systemctl restart tse'
+```
+
+Sessions expire after 12 hours and are revoked on sign-out or server restart. Session cookies use HttpOnly and SameSite=Strict, plus Secure behind the trusted loopback HTTPS proxy. Repeated login attempts are throttled. All application data and update actions require authentication; only the login page, its stylesheet, and the data-free `/healthz` liveness endpoint are public. Nginx must overwrite `X-Forwarded-Proto` and `X-Real-IP` as in the supplied configuration.
+
+While DNS/HTTPS is pending, access privately with:
+
+```bash
+ssh -N -L 8080:127.0.0.1:8000 root@94.184.25.127
+```
+
+Then open `http://localhost:8080`. The SSH connection encrypts the public-network traffic. Once the certificate is active, use `https://tse.talebidir.shop` directly.
+
+### DNS diagnosis
+
+Check independently of your browser or local DNS cache:
+
+```bash
+dig @1.1.1.1 tse.talebidir.shop A
+dig @8.8.8.8 tse.talebidir.shop A
+dig @ns1.parspack.co talebidir.shop SOA +norecurse
+```
+
+The first two should return status NOERROR and A address `94.184.25.127`. At setup, both returned SERVFAIL and direct authoritative queries returned REFUSED. That indicates a DNS service/delegation problem rather than an application or browser problem. The `.shop` registry delegates this domain to `ns1.parspack.co` through `ns4.parspack.co`. Compare these with the exact nameservers assigned to this domain by the ParsPack CDN dashboard; change registrar delegation if they differ. If they match, ask ParsPack to activate/repair the DNS zone and include the authoritative REFUSED responses. Confirm the saved `tse` A record is DNS-only, points to the server, and has no conflicting CNAME/AAAA record. The private dashboard requires your account session and cannot be inspected through a public URL alone.

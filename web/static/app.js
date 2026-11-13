@@ -23,6 +23,7 @@ function fileUrl(sha){return '/api/'+(state.market==='ifb'?'ifb/':'')+'files/'+e
 function url(path,query={}){if(state.market==='ifb'&&path.startsWith('/api/'))path=path.replace('/api/','/api/ifb/');return path+'?'+new URLSearchParams(query).toString();}
 async function api(path,query={},options={}){
  const response=await fetch(url(path,query),options);
+ if(response.status===401){location.assign('/login');throw new Error('Please sign in.');}
  let data;try{data=await response.json();}catch{throw new Error('The server returned an unreadable response. Try again.');}
  if(!response.ok)throw new Error(data.error||'The request failed. Try again.');
  return data;

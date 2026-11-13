@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry TSE HTTPS setup while DNS is pending
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=15min
+Unit=tse-https.service
+
+[Install]
+WantedBy=timers.target

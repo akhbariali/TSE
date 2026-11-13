@@ -1,4 +1,4 @@
-"""No-login TSE report browser. Run: python3 app.py --port 8000"""
+"""Password-protected TSE/IFB report browser. Run: python3 app.py --port 8000"""
 import argparse
 import csv
 import fcntl
@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import io
 import json
 import math
+import os
+from http.cookies import SimpleCookie
 from pathlib import Path
 import re
 import signal
@@ -21,11 +23,13 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from download_reports import read_json
 from index_reports import connect, init_db, normalize
 import ifb_archive
+from app_auth import SingleUserAuth, COOKIE, SESSION_SECONDS
 
 STATIC = ROOT / 'web/static'
 SYNC_LOCK = threading.Lock()
 SYNC_PROCESS = None
 IFB_SYNC_PROCESS = None
+AUTH = None
 
 
 def rows(db, sql, params=()):
@@ -212,6 +216,7 @@ def symbol_detail(db, query):
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 15
     def send(self, data, code=200, content_type='application/json; charset=utf-8', headers=None):
         if isinstance(data, (dict, list)):
             data = json.dumps(data, ensure_ascii=False, allow_nan=False).encode()
@@ -222,18 +227,63 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(data)))
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'same-origin')
-        self.send_header('Cache-Control', 'no-cache')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
         for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
+
+    def session_token(self):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get('Cookie', ''))
+            return cookie[COOKIE].value if COOKIE in cookie else ''
+        except Exception:
+            return ''
+
+    def require_login(self):
+        if AUTH is None:
+            self.send({'error': 'Login is not configured.'}, 503)
+            return False
+        if AUTH.authenticated(self.session_token()):
+            return True
+        if urlsplit(self.path).path.startswith('/api/'):
+            self.send({'error': 'Please sign in.'}, 401)
+        else:
+            self.send('', 303, headers={'Location': '/login'})
+        return False
+
+    def secure_request(self):
+        return self.client_address[0] in ('127.0.0.1', '::1') and self.headers.get('X-Forwarded-Proto') == 'https'
+
+    def session_cookie(self, token, logout=False):
+        return f'{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={0 if logout else SESSION_SECONDS}' + ('; Secure' if self.secure_request() else '')
+
+    def same_origin(self):
+        origin = self.headers.get('Origin')
+        return self.headers.get('Sec-Fetch-Site') != 'cross-site' and (not origin or (urlsplit(origin).scheme in ('http','https') and urlsplit(origin).netloc == self.headers.get('Host')))
+
+    def login_page(self, code=200, limited=False):
+        page = (STATIC/'login.html').read_text()
+        if code != 200:
+            marker = 'class="login-limit"' if limited else 'class="login-error"'
+            page = page.replace(marker + ' role="alert" hidden', marker + ' role="alert"')
+        return self.send(page, code, 'text/html; charset=utf-8')
 
     def do_GET(self):
         try:
             parsed = urlsplit(self.path)
             query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
             route = parsed.path
+            if route == '/healthz':
+                return self.send({'ok': AUTH is not None}, 200 if AUTH is not None else 503)
+            if route == '/login':
+                if AUTH is not None and AUTH.authenticated(self.session_token()):
+                    return self.send('',303,headers={'Location':'/'})
+                return self.login_page()
+            if route != '/static/style.css' and not self.require_login():
+                return
             if route in ('/', '/index.html'):
                 return self.send((STATIC/'index.html').read_bytes(), content_type='text/html; charset=utf-8')
             if route.startswith('/static/'):
@@ -292,6 +342,29 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global SYNC_PROCESS, IFB_SYNC_PROCESS
         endpoint=urlsplit(self.path).path
+        if not self.same_origin():
+            return self.send({'error':'Cross-origin request rejected.'},403)
+        if endpoint=='/login':
+            if AUTH is None:
+                return self.send({'error':'Login is not configured.'},503)
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                if size<=0 or size>8192 or self.headers.get('Content-Type','').split(';')[0]!='application/x-www-form-urlencoded':
+                    return self.send({'error':'Invalid login request.'},400)
+                form=parse_qs(self.rfile.read(size).decode('utf-8'),max_num_fields=5)
+                username=form.get('username',[''])[0];password=form.get('password',[''])[0]
+                if len(username)>200 or len(password)>1024:return self.login_page(401)
+            except (ValueError,UnicodeDecodeError):
+                return self.send({'error':'Invalid login request.'},400)
+            address=self.client_address[0]
+            if address in ('127.0.0.1','::1'):address=self.headers.get('X-Real-IP',address)
+            token,limited=AUTH.login(username,password,address)
+            if not token:return self.login_page(429 if limited else 401,limited)
+            return self.send('',303,headers={'Location':'/','Set-Cookie':self.session_cookie(token)})
+        if not self.require_login():return
+        if endpoint=='/logout':
+            AUTH.logout(self.session_token())
+            return self.send('',303,headers={'Location':'/login','Set-Cookie':self.session_cookie('',True)})
         if endpoint not in ('/api/sync','/api/ifb/sync'):
             return self.send({'error': 'Page not found.'}, 404)
         if endpoint=='/api/ifb/sync':
@@ -305,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({'started':True,'message':'IFB archive refresh started.'},202)
         if urlsplit(self.path).path != '/api/sync':
             return self.send({'error': 'Page not found.'}, 404)
-        # No login. Reject cross-origin mutation requests and require our UI header.
+        # Require same-origin mutation requests and the UI header in addition to login.
         origin = self.headers.get('Origin')
         if self.headers.get('X-TSE-Request') != 'sync' or (origin and urlsplit(origin).netloc != self.headers.get('Host')):
             return self.send({'error': 'Refresh must be started from this app.'}, 403)
@@ -325,6 +398,11 @@ def main():
     parser.add_argument('--port', type=int, default=8000)
     parser.add_argument('--no-index-watch', action='store_true')
     args = parser.parse_args()
+    global AUTH
+    auth_path=os.environ.get('TSE_AUTH_FILE',str(ROOT/'data/auth.json'))
+    try:AUTH=SingleUserAuth.load(auth_path)
+    except (OSError,ValueError,KeyError) as error:
+        parser.exit(2,f'Configure login with python3 scripts/configure_login.py before starting: {error}\n')
     init_db()
     ifb_archive.init_db()
     indexer = None
@@ -337,7 +415,7 @@ def main():
     def stop(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
-    print(f'TSE Market Archive: http://{args.host}:{args.port} (no login)', flush=True)
+    print(f'TSE Market Archive: http://{args.host}:{args.port} (login required)', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -25,3 +25,8 @@
 [data-market="ifb"] :is(button,a,input,select,[tabindex]):focus-visible{outline-color:#e58c95}
 [data-market="ifb"] ::selection{background:#f5cbd0;color:#681b24}
 @media(max-width:900px){.market-switch{width:auto;display:inline-flex;margin:0 0 14px;min-width:160px}.sidebar nav{clear:both}}
+.login-page{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--ground)}
+.login-card{width:100%;max-width:410px;padding:36px;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius)}
+.login-card .source-mark{color:var(--blue);font-weight:700}.login-card h1{margin:16px 0 5px}.login-card>p{color:var(--muted)}
+.login-card form{display:grid;gap:18px;margin-top:24px}.login-card .field{width:100%}.login-card input{width:100%}.login-card .button{justify-content:center}.login-card .login-error,.login-card .login-limit{color:var(--negative)}
+.logout-form{margin:0}
