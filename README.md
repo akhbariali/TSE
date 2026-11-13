@@ -121,3 +121,28 @@ The version change reprocesses **every workbook**, including previously validate
 In symbol history, choose **Average price** to chart daily traded value ÷ volume in rials. Unavailable prices appear as gaps; hover points for dates and prices. The selected report window applies to both the chart and table.
 
 Symbol history defaults to **Both**: net-transfer bars on the left scale (trillion toman) and a blue average-price line on the right scale (rials). Hover a date for both values. Missing prices leave gaps while net-transfer bars remain visible. Each series uses its own scale.
+
+## IFB (Iran Fara Bourse): separate archive
+
+Use **Switch to IFB** at the top of the sidebar to open IFB, and **Switch to TSE** to return. IFB uses a red theme and TSE uses blue; the same navigation links follow the selected market. The **IFB** overview, report library, symbol explorer, and methodology pages use an independent database at `data/ifb/archive.sqlite3`. IFB observations are never added to TSE totals, rankings, history, exports, or downloads. Identical symbol labels in the two markets remain separate. The selected section's **Update archive** button updates only that market.
+
+Source: [IFB periodical reports](https://www.ifb.ir/datareporter/periodicalreport.aspx). The IFB updater submits the daily trading-statistics filter, follows ASP.NET pagination (including subsequent pager groups), and downloads the ownership and price workbooks. The default scans all exposed daily pages; `--limit 20` requests a recent sample without removing older files:
+
+```bash
+python3 scripts/ifb_archive.py
+python3 scripts/ifb_archive.py --limit 20
+```
+
+Ownership workbooks provide purchase/sale value, volume, and investor counts. Columns are identified from the three-level headers. Merged market/submarket labels are carried forward; subtotal and summary rows never become symbols. Blank investor cells in this IFB export layout represent zero; purchase/sale balance and available row totals are checked. Invalid value rows are excluded, while missing/invalid volume leaves volume-derived fields unavailable. Multi-day ownership reports are excluded from daily history to prevent overlapping periods.
+
+Price workbooks are stored as **Price reference** reports and do not add ownership sessions or turnover a second time. Closing and last-trade prices are joined only to the exact IFB symbol and report date. The price workbook's comparison-start date is not the trading date. Average traded price remains trading value ÷ volume; the workbook's published mean is preserved separately because its methodology can differ. Price references can cover fewer symbols than ownership reports; reconciliation gaps are shown in extraction details. Missing prices stay blank.
+
+IFB files, download status, errors, catalog, logs, and manifest live under `data/ifb/`; original Excel files are retained by hash in `data/ifb/raw/`. The two manually supplied inspection files have been removed from the repository root after archiving their usable data. No Excel binaries are committed.
+
+To import additional IFB samples locally:
+
+```bash
+python3 scripts/ifb_archive.py --import-files /path/to/report.xlsx
+```
+
+On every update, the IFB indexer checks cached files before downloading new ones. After changing IFB extraction rules, increment `PARSER_VERSION` in `scripts/ifb_archive.py`; the next update reprocesses all archived IFB workbooks. `--retry-errors` reprocesses cached workbooks without a version bump. Repeated downloads reuse report IDs and content hashes; revisions remain archived, and one ownership revision per date enters analytics. A dedicated IFB lock prevents concurrent update writers. Interrupted/failed downloads are retried on the next update. Review **IFB → Data & methodology** and the report library for coverage and exclusions.

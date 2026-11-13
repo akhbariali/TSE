@@ -7,3 +7,21 @@
 @media(prefers-reduced-motion:no-preference){.breadth span{transition:width 280ms cubic-bezier(.16,1,.3,1)}.sidebar nav a{transition:background-color 140ms ease-out}.notice{animation:notice-in 250ms cubic-bezier(.16,1,.3,1)}@keyframes notice-in{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0)}}}
 
 .legend i.series{background:var(--blue)}
+
+/* Keep both market sections reachable on shorter displays. */
+@media(min-width:901px){.sidebar{overflow-y:auto}.sidebar nav{flex-shrink:0}.sidebar-footer{padding-top:18px}.brand{flex-shrink:0}}
+.badge.partial{background:var(--amber-soft);color:var(--amber)}
+.badge.reference{background:#e5ecfb;color:var(--blue)}
+
+.market-switch{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:11px 12px;margin:0 0 18px;border:1px solid #ffffff70;border-radius:7px;background:#ffffff16;color:#fff;font-weight:600;text-align:left}
+.market-switch:hover{background:#ffffff2b}.market-switch span{font-size:20px;line-height:1}
+:root[data-market="ifb"]{--blue:#a52b35;--blue-dark:#7e1e28;--blue-soft:#fff0f1;--ground:#fcf5f5;--line:#ecdadd}
+[data-market="ifb"] .sidebar nav a:hover{background:#b73a45}
+[data-market="ifb"] .sidebar nav a[aria-current=page]{background:#fff;color:var(--blue)}
+[data-market="ifb"] .sidebar nav a{color:#ffe4e6}
+[data-market="ifb"] .brand-sub,[data-market="ifb"] .source-mark{color:#ffdade}
+[data-market="ifb"] .sidebar-footer{border-color:#cc727a}
+[data-market="ifb"] .nav-count,[data-market="ifb"] .badge.reference{background:#fbe0e3;color:var(--blue-dark)}
+[data-market="ifb"] :is(button,a,input,select,[tabindex]):focus-visible{outline-color:#e58c95}
+[data-market="ifb"] ::selection{background:#f5cbd0;color:#681b24}
+@media(max-width:900px){.market-switch{width:auto;display:inline-flex;margin:0 0 14px;min-width:160px}.sidebar nav{clear:both}}

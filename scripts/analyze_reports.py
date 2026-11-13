@@ -16,7 +16,7 @@ NS = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 
 
-def workbook(path):
+def workbook(path, all_sheets=False):
     with zipfile.ZipFile(path) as archive:
         strings = []
         if 'xl/sharedStrings.xml' in archive.namelist():
@@ -28,7 +28,7 @@ def workbook(path):
         for sheet in ET.fromstring(archive.read('xl/workbook.xml')).find('m:sheets', NS):
             # Hidden sheets repeat the visible report and can contain very large
             # formatting ranges. Read only the three source tables we use.
-            if sheet.get('name') not in ('خلاصه بازار', 'تغییر مالکیت براساس حجم', 'تغییر مالکیت براساس ارزش'):
+            if not all_sheets and sheet.get('name') not in ('خلاصه بازار', 'تغییر مالکیت براساس حجم', 'تغییر مالکیت براساس ارزش'):
                 continue
             target = relationships[sheet.get(f'{{{REL}}}id')]
             target = target.lstrip('/') if target.startswith('/') else 'xl/' + target

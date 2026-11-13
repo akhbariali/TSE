@@ -26,11 +26,13 @@ def connect(path=DB):
     return connection
 
 
-def init_db():
-    DB.parent.mkdir(exist_ok=True)
-    with connect() as db:
+def init_db(path=None):
+    target = path or DB
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with connect(target) as db:
         db.execute('PRAGMA journal_mode=WAL')
         db.executescript('''
+        BEGIN;
         CREATE TABLE IF NOT EXISTS workbooks (
           sha TEXT PRIMARY KEY, file TEXT NOT NULL UNIQUE, source_name TEXT,
           report_id INTEGER, title TEXT, effective_date TEXT, published_at TEXT,
@@ -56,6 +58,7 @@ def init_db():
               PARTITION BY date ORDER BY (state='ready') DESC, COALESCE(published_at,'') DESC, report_id DESC, sha
             ) AS revision_rank FROM workbooks WHERE state IN ('ready','partial')
           ) WHERE revision_rank=1;
+        COMMIT;
         ''')
 
 

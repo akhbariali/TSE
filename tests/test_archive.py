@@ -161,7 +161,7 @@ class RecoveryIndexTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'archive.sqlite3'
             original_connect=index.connect
-            with patch.object(index,'DB',path), patch.object(index,'connect',lambda: original_connect(path)):
+            with patch.object(index,'DB',path), patch.object(index,'connect',lambda *args: original_connect(path)):
                 index.init_db()
                 with index.connect() as db:
                     db.executemany('INSERT INTO workbooks (sha,file,date,state,published_at,report_id) VALUES (?,?,?,?,?,?)',[

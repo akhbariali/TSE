@@ -20,10 +20,12 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'scripts'))
 from download_reports import read_json
 from index_reports import connect, init_db, normalize
+import ifb_archive
 
 STATIC = ROOT / 'web/static'
 SYNC_LOCK = threading.Lock()
 SYNC_PROCESS = None
+IFB_SYNC_PROCESS = None
 
 
 def rows(db, sql, params=()):
@@ -73,13 +75,14 @@ def numeric_day(row):
     return data
 
 
-def status(db):
-    download = read_json(ROOT / 'data/download-status.json', {})
+def status(db, market='tse'):
+    folder = ifb_archive.FOLDER if market=='ifb' else ROOT/'data'
+    download = read_json(folder / 'download-status.json', {})
     if download.get('phase') in ('catalog', 'downloading'):
         # A terminated process can leave an in-progress checkpoint behind.
         # Inspect the OS lock so that the UI can offer resume after a restart.
         try:
-            with (ROOT / 'data/download.lock').open('r') as lock:
+            with (folder / 'download.lock').open('r') as lock:
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     download = {**download, 'phase': 'interrupted'}
@@ -87,20 +90,21 @@ def status(db):
                     pass
         except FileNotFoundError:
             download = {**download, 'phase': 'interrupted'}
-    indexing = read_json(ROOT / 'data/index-status.json', {})
-    catalog = read_json(ROOT / 'data/report-catalog.json', {})
-    manifest = read_json(ROOT / 'data/download-manifest.json', [])
+    indexing = read_json(folder / 'index-status.json', {})
+    catalog = read_json(folder / 'report-catalog.json', {})
+    manifest = read_json(folder / 'download-manifest.json', [])
     count = dict(db.execute('''SELECT COUNT(*) AS indexed,
               SUM(state='ready') AS ready, SUM(state IN ('warning','partial')) AS warning, SUM(state='partial') AS partial,
               SUM(state='unsupported') AS unsupported FROM workbooks''').fetchone())
     active = dict(db.execute('SELECT COUNT(*) AS reports, MIN(date) AS first_date, MAX(date) AS last_date FROM active_reports').fetchone())
     with SYNC_LOCK:
-        syncing = SYNC_PROCESS is not None and SYNC_PROCESS.poll() is None
+        process = IFB_SYNC_PROCESS if market=='ifb' else SYNC_PROCESS
+        syncing = process is not None and process.poll() is None
     return {'download': download, 'indexing': indexing, 'counts': {**count, **active},
             'downloaded_files': len({e['file'] for e in manifest}), 'attachments': len(manifest),
             'catalog_reports': catalog.get('total_count', 0), 'sync_running': syncing,
-            'errors': read_json(ROOT / 'data/download-errors.json', []),
-            'issues': rows(db, "SELECT sha,source_name,state,error,issues FROM workbooks WHERE state!='ready' ORDER BY effective_date DESC LIMIT 100"),
+            'errors': read_json(folder / 'download-errors.json', []),
+            'issues': rows(db, "SELECT sha,source_name,state,error,issues FROM workbooks WHERE state IN ('warning','partial','unsupported') OR (state='reference' AND issues!='[]') ORDER BY effective_date DESC LIMIT 100"),
             'updated_at': datetime.now(timezone.utc).isoformat()}
 
 
@@ -115,7 +119,7 @@ def overview(db, query):
     aggregate['average_turnover_rial'] = aggregate['turnover_rial']/len(days) if days else 0
     return {'scope': scope_info(selected), 'days': days, 'aggregate': aggregate,
             'latest': days[-1] if days else None, 'dates': [r['date'] for r in available],
-            'status': status(db)}
+            'status': status(db, query.get('_market','tse'))}
 
 
 def flow_query(db, query, export=False):
@@ -166,7 +170,7 @@ def reports(db, query):
         if value:
             clause += f' AND date{operator}?'
             params.append(value)
-    if query.get('state') in ('ready', 'partial', 'warning', 'unsupported'):
+    if query.get('state') in ('ready', 'partial', 'warning', 'unsupported', 'reference'):
         clause += ' AND state=?'
         params.append(query['state'])
     total = db.execute('SELECT COUNT(*) FROM workbooks WHERE '+clause, params).fetchone()[0]
@@ -186,6 +190,19 @@ def symbol_detail(db, query):
                         f.turnover_rial/NULLIF(f.volume,0) AS average_price_rial FROM flows f
                         JOIN active_reports a ON a.sha=f.workbook_sha
                         WHERE {clause} AND f.symbol=? ORDER BY a.date''', [*params, symbol])
+    if query.get('_market')=='ifb':
+        for day in data:
+            metadata=db.execute('SELECT payload FROM ifb_metadata WHERE workbook_sha=? AND symbol=?',(day['sha'],symbol)).fetchone()
+            if metadata:
+                details=json.loads(metadata['payload'])
+                day.update({k:float(v) if k.endswith('_count') and v is not None else v for k,v in details.items() if k not in ('date','symbol','company')})
+            quote_row=db.execute('''SELECT p.payload,p.workbook_sha FROM ifb_prices p JOIN workbooks w ON w.sha=p.workbook_sha
+                WHERE p.date=? AND p.symbol=? ORDER BY COALESCE(w.report_id,0) DESC,w.indexed_at DESC LIMIT 1''',(day['date'],symbol)).fetchone()
+            if quote_row:
+                quotes=json.loads(quote_row['payload'])
+                for key in ('closing_price_rial','last_price_rial','source_average_price_rial'):
+                    value=quotes.get(key);day[key]=float(value) if value is not None else None
+                day['price_sha']=quote_row['workbook_sha']
     return {'symbol': symbol, 'company': data[-1]['company'] if data else '',
             'scope': scope_info(selected), 'days': data,
             'net_rial': sum(r['retail_net_rial'] for r in data),
@@ -225,11 +242,15 @@ class Handler(BaseHTTPRequestHandler):
                 if name not in allowed:
                     return self.send({'error': 'File not found.'}, 404)
                 return self.send((STATIC/name).read_bytes(), content_type=allowed[name]+'; charset=utf-8')
-            with connect() as db:
+            market='ifb' if route.startswith('/api/ifb/') else 'tse'
+            if market=='ifb':
+                route=route.replace('/api/ifb/','/api/',1)
+            query['_market']=market
+            with connect(ifb_archive.DB) if market=='ifb' else connect() as db:
                 if route == '/api/overview':
                     result = overview(db, query)
                 elif route == '/api/status':
-                    result = status(db)
+                    result = status(db, market)
                 elif route == '/api/flows':
                     result = flow_query(db, query)
                 elif route == '/api/reports':
@@ -245,14 +266,14 @@ class Handler(BaseHTTPRequestHandler):
                         writer.writeheader()
                         writer.writerows(result)
                     return self.send(output.getvalue(), content_type='text/csv; charset=utf-8',
-                                     headers={'Content-Disposition': f'attachment; filename="tse-{route.rsplit("/",1)[-1]}.csv"'})
+                                     headers={'Content-Disposition': f'attachment; filename="{market}-{route.rsplit("/",1)[-1]}.csv"'})
                 elif route.startswith('/api/files/'):
                     digest = route.removeprefix('/api/files/')
                     record = db.execute('SELECT file,source_name FROM workbooks WHERE sha=?', (digest,)).fetchone()
                     if not record:
                         return self.send({'error': 'Workbook not found.'}, 404)
                     path = (ROOT/record['file']).resolve()
-                    if not path.is_relative_to((ROOT/'data/raw').resolve()) or not path.is_file():
+                    if not path.is_relative_to(((ifb_archive.FOLDER/'raw') if market=='ifb' else (ROOT/'data/raw')).resolve()) or not path.is_file():
                         return self.send({'error': 'Workbook is unavailable on disk. Refresh the archive to retry.'}, 404)
                     content_type = 'application/vnd.ms-excel' if path.suffix=='.xls' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                     return self.send(path.read_bytes(), content_type=content_type,
@@ -269,7 +290,19 @@ class Handler(BaseHTTPRequestHandler):
             self.send({'error': 'The report could not be loaded. Please try again.'}, 500)
 
     def do_POST(self):
-        global SYNC_PROCESS
+        global SYNC_PROCESS, IFB_SYNC_PROCESS
+        endpoint=urlsplit(self.path).path
+        if endpoint not in ('/api/sync','/api/ifb/sync'):
+            return self.send({'error': 'Page not found.'}, 404)
+        if endpoint=='/api/ifb/sync':
+            if self.headers.get('X-TSE-Request') != 'sync' or (self.headers.get('Origin') and urlsplit(self.headers['Origin']).netloc != self.headers.get('Host')):
+                return self.send({'error': 'Refresh must be started from this app.'},403)
+            with SYNC_LOCK:
+                if IFB_SYNC_PROCESS is not None and IFB_SYNC_PROCESS.poll() is None:
+                    return self.send({'started':False,'message':'An IFB refresh is already running.'},202)
+                with (ifb_archive.FOLDER/'sync.log').open('a') as log:
+                    IFB_SYNC_PROCESS=subprocess.Popen([sys.executable,str(ROOT/'scripts/ifb_archive.py')],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
+            return self.send({'started':True,'message':'IFB archive refresh started.'},202)
         if urlsplit(self.path).path != '/api/sync':
             return self.send({'error': 'Page not found.'}, 404)
         # No login. Reject cross-origin mutation requests and require our UI header.
@@ -293,6 +326,7 @@ def main():
     parser.add_argument('--no-index-watch', action='store_true')
     args = parser.parse_args()
     init_db()
+    ifb_archive.init_db()
     indexer = None
     if not args.no_index_watch:
         log = (ROOT/'data/index.log').open('a')
