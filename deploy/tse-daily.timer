@@ -1,0 +1,13 @@
+[Unit]
+Description=Collect TSETMC data after trading and retry late updates
+
+[Timer]
+OnCalendar=*-*-* 20:30:00 Asia/Tehran
+OnCalendar=*-*-* 22:30:00 Asia/Tehran
+OnCalendar=*-*-* 08:00:00 Asia/Tehran
+Persistent=true
+AccuracySec=1min
+Unit=tse-daily.service
+
+[Install]
+WantedBy=timers.target

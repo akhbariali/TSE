@@ -240,3 +240,33 @@ Docker Engine, Compose, and Buildx are installed from Docker's official Debian a
 Nginx configuration lives in `/etc/nginx/sites-available/tse`, enabled through `/etc/nginx/sites-enabled/tse`. Global configuration is `/etc/nginx/nginx.conf`; additional services can use separate site files.
 
 The server-side 24-hour follow-up and its log were removed at the user’s request. The existing `tse-https.timer` continues checking DNS and certificate readiness every 15 minutes; ChatGPT reminders are managed separately.
+
+## Daily TSETMC collection (from 1405/08/23)
+
+New daily data comes from **actual individual purchase/sale values**, not volume multiplied by closing price. The existing TSE/IFB Excel files and revisions remain intact. On overlapping dates an accepted TSETMC snapshot takes priority in analytics; original Excel reports remain in the library. See [verified endpoints and source checks](docs/tsetmc-verification.md).
+
+**Hide funds · صندوق** in the period controls excludes funds from totals, charts, symbol lists/history and CSV exports, for either market. The preference is saved in the browser. Current TSETMC fund types, exact ticker aliases, archive company names and IFB fund labels supply classification. Unclassified historical funds can remain until identified. TSE and IFB are never combined.
+
+The feed covers primary shares, rights and exchange-traded funds, excluding secondary trade boards, debt and derivatives. It uses current membership, not a survivorship-free historical universe. Its totals can differ from an Excel report with a broader scope; source labels and retained-row counts are visible. Missing observations are not zero. A partial snapshot includes only validated instruments, with exclusions recorded in its Source JSON.
+
+### Routine after every update
+
+1. On the server, deploy through `tse-update`. Install/update the schedule after changing its files:
+   ```bash
+   install -m 0644 /opt/tse/deploy/tse-daily.service /opt/tse/deploy/tse-daily.timer /etc/systemd/system/
+   systemctl daemon-reload
+   systemctl enable --now tse-daily.timer
+   ```
+2. The timer collects both markets at **20:30 and 22:30 Asia/Tehran**, and retries at **08:00**. It runs the last seven calendar days again and retries unresolved dates since 1405/08/23. Thursday/Friday are skipped. Missed timer execution runs on restart. Inspect `systemctl list-timers tse-daily.timer` and `journalctl -u tse-daily.service`.
+3. Use **Update daily data** to collect now (both markets), or `systemctl start tse-daily.service`. **Update Excel archive** remains a separate manual operation; it does not replace API data.
+4. Inspect `data/tsetmc/status.json`: phase, per-market published flags, retained rows, no-trade counts and exclusions. A completed fetch can still have unpublished dates. Source JSON files under `data/api/` and `data/ifb/api/` include exact decimal values and raw-response hashes; originals are in `data/tsetmc/raw/*.json.gz`. Keep these with SQLite and the Excel archive in backups.
+5. For an explicit backfill, run as the service user:
+   ```bash
+   cd /opt/tse
+   runuser -u tse -- python3 scripts/tsetmc_daily.py --start 2026-11-14 --end 2026-11-15
+   ```
+   Dates are Gregorian CLI arguments; these are 1405/08/23 and 1405/08/24. `--cache-seconds 0` forces fresh requests. The default cache is one hour, requests are globally limited to eight/second with retries, and an OS lock prevents overlapping collectors. `--limit N` is diagnostic and **never publishes**.
+
+Records require matching instrument/date and balanced purchase/sale values and volumes matching that day's closing totals. Missing actual values are excluded without approximation. A refresh with more than 10% accounting/request failures (minimum allowance two), or a drop exceeding 20% from an existing API snapshot, cannot replace the active date. Instruments without a dated closing observation remain explicitly missing; they do not count as validated no-trade observations. Dates with no records do not produce artificial zero sessions. Accepted revisions retain earlier snapshots. SQLite/chart values use floating-point approximations; Source JSON and compressed original responses preserve source precision.
+
+Net flow in rials = `buy_I_Value - sell_I_Value`; divide by **10,000,000,000** for billion toman. Existing chart `T` labels mean **trillion toman**, dividing by 10¹³. Average traded price remains traded value ÷ volume, in rials.

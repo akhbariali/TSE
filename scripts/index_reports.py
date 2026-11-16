@@ -51,15 +51,30 @@ def init_db(path=None):
         );
         CREATE INDEX IF NOT EXISTS flows_symbol ON flows(symbol);
         CREATE INDEX IF NOT EXISTS workbooks_date ON workbooks(date);
+        CREATE TABLE IF NOT EXISTS instrument_classification (
+          symbol TEXT PRIMARY KEY, instrument_code TEXT, is_fund INTEGER,
+          security_type INTEGER, updated_at TEXT
+        );
+        COMMIT;
+        ''')
+
+        existing={r['name'] for r in db.execute('PRAGMA table_info(workbooks)')}
+        if 'source' not in existing:
+            db.execute("ALTER TABLE workbooks ADD COLUMN source TEXT NOT NULL DEFAULT 'excel'")
+        existing={r['name'] for r in db.execute('PRAGMA table_info(flows)')}
+        for name,kind in [('instrument_code','TEXT'),('is_fund','INTEGER'),('closing_price_rial','REAL'),('last_price_rial','REAL')]:
+            if name not in existing:db.execute(f'ALTER TABLE flows ADD COLUMN {name} {kind}')
+        db.commit()
+        db.executescript("""BEGIN;
         DROP VIEW IF EXISTS active_reports;
         CREATE VIEW active_reports AS
           SELECT * FROM (
             SELECT *, ROW_NUMBER() OVER (
-              PARTITION BY date ORDER BY (state='ready') DESC, COALESCE(published_at,'') DESC, report_id DESC, sha
+              PARTITION BY date ORDER BY (source='tsetmc') DESC, (state='ready') DESC,
+                COALESCE(published_at,'') DESC, COALESCE(report_id,0) DESC, sha
             ) AS revision_rank FROM workbooks WHERE state IN ('ready','partial')
           ) WHERE revision_rank=1;
-        COMMIT;
-        ''')
+        COMMIT;""")
 
 
 def normalize(text):
@@ -104,7 +119,7 @@ def ingest(entry, retry=False):
     with connect() as db:
         db.execute('DELETE FROM workbooks WHERE sha=?', (digest,))
         db.execute(f'INSERT INTO workbooks ({",".join(columns)}) VALUES ({",".join("?" for _ in columns)})', list(meta.values()))
-        db.executemany(f'INSERT INTO flows VALUES ({",".join("?" for _ in range(4+len(flow_keys)))})',
+        db.executemany(f'INSERT INTO flows (workbook_sha,symbol,company,search_text,{",".join(flow_keys)}) VALUES ({",".join("?" for _ in range(4+len(flow_keys)))})',
                        [(digest, r['symbol'], r['company'], normalize(r['symbol']+' '+r['company']),
                          *[float(r[k]) if r[k] not in ('', None) else None for k in flow_keys]) for r in records])
     print(f"{state}: {path.name} ({len(records)} rows){': '+error if error else ''}", flush=True)

@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from download_reports import read_json
 from index_reports import connect, init_db, normalize
 import ifb_archive
+import tsetmc_daily
 from app_auth import SingleUserAuth, COOKIE, SESSION_SECONDS
 
 STATIC = ROOT / 'web/static'
@@ -43,7 +44,7 @@ def validate_date(value):
 
 
 def selection(db, query):
-    available = rows(db, 'SELECT sha,date,daily,published_at,report_id FROM active_reports ORDER BY date')
+    available = rows(db, 'SELECT sha,date,daily,published_at,report_id,source FROM active_reports ORDER BY date')
     start = validate_date(query.get('start', ''))
     end = validate_date(query.get('end', ''))
     if start and end and start > end:
@@ -73,10 +74,47 @@ def scope_info(selected):
 def numeric_day(row):
     data = json.loads(row['daily'])
     for key, value in list(data.items()):
-        if key not in ('date', 'file') and isinstance(value, str):
+        if key not in ('date', 'file', 'source', 'universe', 'gregorian_date') and isinstance(value, str):
             data[key] = float(value)
+    data.setdefault('source',row.get('source','excel'))
+    data['net_retail_flow_billion_toman']=data['retail_net_rial']/1e10
     data.update(sha=row['sha'], published_at=row['published_at'], report_id=row['report_id'])
     return data
+
+
+def exclude_funds(query):
+    return query.get('exclude_funds','0') in ('1','true')
+
+
+def fund_clause(query, alias='f'):
+    if not exclude_funds(query):return '1'
+    symbol=f"REPLACE(REPLACE(REPLACE(REPLACE({alias}.symbol,'ي','ی'),'ك','ک'),' ',''),'‌','')"
+    company=f"REPLACE(REPLACE({alias}.company,' ',''),'‌','')"
+    return f"""COALESCE({alias}.is_fund,0)=0
+      AND instr({company},'صندوق')=0 AND instr({company},'ص.س')=0
+      AND NOT EXISTS(SELECT 1 FROM instrument_classification c WHERE c.symbol={symbol} AND c.is_fund=1)"""
+
+
+def filtered_days(db, selected, query):
+    if not exclude_funds(query) or not selected:return [numeric_day(r) for r in selected]
+    data=rows(db,f"""WITH ranked AS (
+      SELECT f.*,ROW_NUMBER() OVER(PARTITION BY f.workbook_sha ORDER BY f.turnover_rial DESC) AS rn
+      FROM flows f JOIN active_reports a ON a.sha=f.workbook_sha
+      WHERE a.date BETWEEN ? AND ? AND {fund_clause(query)})
+      SELECT workbook_sha,COUNT(*) AS symbols,SUM(volume) AS volume,SUM(turnover_rial) AS turnover_rial,
+      SUM(retail_net_rial) AS retail_net_rial,SUM(retail_net_rial>0) AS retail_net_positive_symbols,
+      SUM(retail_net_rial<0) AS retail_net_negative_symbols,SUM(retail_net_rial=0) AS retail_net_zero_symbols,
+      SUM(retail_buy_rial)/NULLIF(SUM(turnover_rial),0) AS retail_buy_value_share,
+      SUM(retail_sell_rial)/NULLIF(SUM(turnover_rial),0) AS retail_sell_value_share,
+      SUM(CASE WHEN rn<=10 THEN turnover_rial ELSE 0 END)/NULLIF(SUM(turnover_rial),0) AS top10_turnover_share
+      FROM ranked GROUP BY workbook_sha""",[selected[0]['date'],selected[-1]['date']])
+    by_sha={r.pop('workbook_sha'):r for r in data};days=[]
+    for r in selected:
+        day=numeric_day(r)
+        fields=['symbols','volume','turnover_rial','retail_net_rial','retail_net_positive_symbols','retail_net_negative_symbols','retail_net_zero_symbols']
+        day.update(by_sha.get(r['sha'],{**dict.fromkeys(fields,0),'top10_turnover_share':None,'retail_buy_value_share':None,'retail_sell_value_share':None}))
+        day['funds_excluded']=True;day['net_retail_flow_billion_toman']=day['retail_net_rial']/1e10;days.append(day)
+    return days
 
 
 def status(db, market='tse'):
@@ -109,14 +147,16 @@ def status(db, market='tse'):
             'catalog_reports': catalog.get('total_count', 0), 'sync_running': syncing,
             'errors': read_json(folder / 'download-errors.json', []),
             'issues': rows(db, "SELECT sha,source_name,state,error,issues FROM workbooks WHERE state IN ('warning','partial','unsupported') OR (state='reference' AND issues!='[]') ORDER BY effective_date DESC LIMIT 100"),
+            'daily_feed': read_json(ROOT/'data/tsetmc/status.json',{}),
             'updated_at': datetime.now(timezone.utc).isoformat()}
 
 
 def overview(db, query):
     available, selected = selection(db, query)
-    days = [numeric_day(r) for r in selected]
+    days = filtered_days(db, selected, query)
     aggregate = {'net_rial': sum(d['retail_net_rial'] for d in days),
                  'turnover_rial': sum(d['turnover_rial'] for d in days),
+                 'net_billion_toman': sum(d['retail_net_rial'] for d in days)/1e10,
                  'positive_days': sum(d['retail_net_rial'] > 0 for d in days),
                  'negative_days': sum(d['retail_net_rial'] < 0 for d in days),
                  'observations': sum(d['symbols'] for d in days)}
@@ -128,6 +168,7 @@ def overview(db, query):
 
 def flow_query(db, query, export=False):
     clause, params, selected = scope_clause(db, query)
+    clause += ' AND '+fund_clause(query)
     search = normalize(query.get('q', '').strip())
     if search:
         clause += ' AND instr(f.search_text,?)>0'
@@ -146,6 +187,7 @@ def flow_query(db, query, export=False):
     order = sorting.get(query.get('sort', 'net_desc'), 'net_rial DESC')
     sql = f'''SELECT f.symbol, MAX(f.company) AS company, COUNT(*) AS observed_days, SUM(a.state='partial') AS partial_days,
                 SUM(f.turnover_rial) AS turnover_rial, SUM(f.retail_net_rial) AS net_rial,
+                SUM(f.retail_net_rial)/1e10 AS net_billion_toman,
                 SUM(CASE WHEN f.volume>0 THEN f.turnover_rial END)/NULLIF(SUM(CASE WHEN f.volume>0 THEN f.volume END),0) AS average_price_rial,
                 SUM(f.retail_buy_rial) AS buy_rial, SUM(f.retail_sell_rial) AS sell_rial,
                 SUM(f.retail_net_rial>0) AS positive_days, SUM(f.retail_net_rial<0) AS negative_days,
@@ -178,7 +220,7 @@ def reports(db, query):
         clause += ' AND state=?'
         params.append(query['state'])
     total = db.execute('SELECT COUNT(*) FROM workbooks WHERE '+clause, params).fetchone()[0]
-    items = rows(db, '''SELECT sha,source_name,title,date,effective_date,published_at,state,error,issues,bytes,
+    items = rows(db, '''SELECT sha,source_name,title,date,effective_date,published_at,state,error,issues,bytes,source,
                  detail_url,report_id,EXISTS(SELECT 1 FROM active_reports a WHERE a.sha=workbooks.sha) AS active
                  FROM workbooks WHERE '''+clause+' ORDER BY effective_date DESC,published_at DESC LIMIT ? OFFSET ?',
                  [*params, size, (page-1)*size])
@@ -190,10 +232,13 @@ def symbol_detail(db, query):
     if not symbol:
         raise ValueError('Choose a symbol.')
     clause, params, selected = scope_clause(db, query)
-    data = rows(db, f'''SELECT a.date,a.sha,a.published_at,a.state AS report_state,f.*,
+    clause += ' AND '+fund_clause(query)
+    data = rows(db, f'''SELECT a.date,a.sha,a.published_at,a.source,a.state AS report_state,f.*,
                         f.turnover_rial/NULLIF(f.volume,0) AS average_price_rial FROM flows f
                         JOIN active_reports a ON a.sha=f.workbook_sha
                         WHERE {clause} AND f.symbol=? ORDER BY a.date''', [*params, symbol])
+    for day in data:
+        day['net_retail_flow_billion_toman']=day['retail_net_rial']/1e10
     if query.get('_market')=='ifb':
         for day in data:
             metadata=db.execute('SELECT payload FROM ifb_metadata WHERE workbook_sha=? AND symbol=?',(day['sha'],symbol)).fetchone()
@@ -202,7 +247,7 @@ def symbol_detail(db, query):
                 day.update({k:float(v) if k.endswith('_count') and v is not None else v for k,v in details.items() if k not in ('date','symbol','company')})
             quote_row=db.execute('''SELECT p.payload,p.workbook_sha FROM ifb_prices p JOIN workbooks w ON w.sha=p.workbook_sha
                 WHERE p.date=? AND p.symbol=? ORDER BY COALESCE(w.report_id,0) DESC,w.indexed_at DESC LIMIT 1''',(day['date'],symbol)).fetchone()
-            if quote_row:
+            if quote_row and day['source']!='tsetmc':
                 quotes=json.loads(quote_row['payload'])
                 for key in ('closing_price_rial','last_price_rial','source_average_price_rial'):
                     value=quotes.get(key);day[key]=float(value) if value is not None else None
@@ -319,13 +364,14 @@ class Handler(BaseHTTPRequestHandler):
                                      headers={'Content-Disposition': f'attachment; filename="{market}-{route.rsplit("/",1)[-1]}.csv"'})
                 elif route.startswith('/api/files/'):
                     digest = route.removeprefix('/api/files/')
-                    record = db.execute('SELECT file,source_name FROM workbooks WHERE sha=?', (digest,)).fetchone()
+                    record = db.execute('SELECT file,source_name,source FROM workbooks WHERE sha=?', (digest,)).fetchone()
                     if not record:
                         return self.send({'error': 'Workbook not found.'}, 404)
                     path = (ROOT/record['file']).resolve()
-                    if not path.is_relative_to(((ifb_archive.FOLDER/'raw') if market=='ifb' else (ROOT/'data/raw')).resolve()) or not path.is_file():
+                    allowed_root=((ifb_archive.FOLDER if market=='ifb' else ROOT/'data')/('api' if record['source']=='tsetmc' else 'raw')).resolve()
+                    if not path.is_relative_to(allowed_root) or not path.is_file():
                         return self.send({'error': 'Workbook is unavailable on disk. Refresh the archive to retry.'}, 404)
-                    content_type = 'application/vnd.ms-excel' if path.suffix=='.xls' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    content_type = 'application/json; charset=utf-8' if record['source']=='tsetmc' else 'application/vnd.ms-excel' if path.suffix=='.xls' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                     return self.send(path.read_bytes(), content_type=content_type,
                                      headers={'Content-Disposition': "attachment; filename*=UTF-8''"+quote(record['source_name'])})
                 else:
@@ -365,8 +411,15 @@ class Handler(BaseHTTPRequestHandler):
         if endpoint=='/logout':
             AUTH.logout(self.session_token())
             return self.send('',303,headers={'Location':'/login','Set-Cookie':self.session_cookie('',True)})
-        if endpoint not in ('/api/sync','/api/ifb/sync'):
+        if endpoint not in ('/api/sync','/api/ifb/sync','/api/daily-sync','/api/ifb/daily-sync'):
             return self.send({'error': 'Page not found.'}, 404)
+        if endpoint in ('/api/daily-sync','/api/ifb/daily-sync'):
+            if self.headers.get('X-TSE-Request')!='sync' or (self.headers.get('Origin') and urlsplit(self.headers['Origin']).netloc!=self.headers.get('Host')):return self.send({'error':'Refresh must be started from this app.'},403)
+            # The collector's OS lock serializes manual and scheduled runs.
+            (ROOT/'data/tsetmc').mkdir(parents=True,exist_ok=True)
+            with (ROOT/'data/tsetmc/sync.log').open('a') as log:
+                subprocess.Popen([sys.executable,str(ROOT/'scripts/tsetmc_daily.py')],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
+            return self.send({'started':True,'message':'TSETMC daily update started for TSE and IFB.'},202)
         if endpoint=='/api/ifb/sync':
             if self.headers.get('X-TSE-Request') != 'sync' or (self.headers.get('Origin') and urlsplit(self.headers['Origin']).netloc != self.headers.get('Host')):
                 return self.send({'error': 'Refresh must be started from this app.'},403)

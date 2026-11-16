@@ -30,3 +30,5 @@
 .login-card .source-mark{color:var(--blue);font-weight:700}.login-card h1{margin:16px 0 5px}.login-card>p{color:var(--muted)}
 .login-card form{display:grid;gap:18px;margin-top:24px}.login-card .field{width:100%}.login-card input{width:100%}.login-card .button{justify-content:center}.login-card .login-error,.login-card .login-limit{color:var(--negative)}
 .logout-form{margin:0}
+
+.fund-filter{display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;white-space:nowrap}.fund-filter input{accent-color:var(--blue);width:16px;height:16px}.top-actions{flex-wrap:wrap}.topbar{height:auto;min-height:72px;padding-top:10px;padding-bottom:10px}

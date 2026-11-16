@@ -176,11 +176,11 @@ class RecoveryIndexTests(unittest.TestCase):
 class QueryTests(unittest.TestCase):
     def setUp(self):
         self.db=sqlite3.connect(':memory:');self.db.row_factory=sqlite3.Row
-        self.db.executescript('''CREATE TABLE active_reports (sha,date,daily,published_at,report_id,state);
+        self.db.executescript('''CREATE TABLE active_reports (sha,date,daily,published_at,report_id,state,source);
           CREATE TABLE flows(workbook_sha,symbol,company,search_text,turnover_rial,retail_net_rial,
                              retail_buy_rial,retail_sell_rial,volume REAL);''')
         for n in range(1,4):
-            self.db.execute('INSERT INTO active_reports VALUES (?,?,?,?,?,?)',(str(n),f'1405/08/{n:02}', '{}','2026-11-10',n,'ready'))
+            self.db.execute('INSERT INTO active_reports VALUES (?,?,?,?,?,?,?)',(str(n),f'1405/08/{n:02}', '{}','2026-11-10',n,'ready','excel'))
             self.db.execute('INSERT INTO flows VALUES (?,?,?,?,?,?,?,?,?)',(str(n),'وبملت1','بانک ملت','وبملت1بانکملت',100,n*10,50+n*10,50,n*10))
 
     def tearDown(self):self.db.close()
