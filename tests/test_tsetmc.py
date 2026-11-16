@@ -64,6 +64,22 @@ class TsetmcTests(unittest.TestCase):
         self.assertEqual([r['market'] for r in universe],['tse','ifb','ifb'])
         self.assertTrue(universe[-1]['is_fund'])
 
+    def test_fund_classification_includes_commodity_and_other_trade_suffixes(self):
+        payload={'marketwatch':[{'insCode':'200','lva':'طلا','lvc':'صندوق طلا','insID':'IRTEST0001','yVal':380,'flow':7}]}
+        funds=feed.fund_catalog(payload)
+        self.assertEqual(funds[0]['is_fund'],1)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);db_path=root/'data/archive.sqlite3';index.init_db(db_path)
+            with index.connect(db_path) as db:
+                db.execute('CREATE TABLE ifb_metadata(workbook_sha TEXT,symbol TEXT,payload TEXT)')
+                db.execute("INSERT INTO workbooks(sha,file,state) VALUES ('old','old.xlsx','ready')")
+                db.execute("INSERT INTO flows(workbook_sha,symbol,company,search_text) VALUES ('old','طلا4','کالا','کالا')")
+            with patch.object(feed,'ROOT',root),patch.object(feed.ifb_archive,'DB',db_path):
+                feed.classify([],funds)
+            with index.connect(db_path) as db:
+                self.assertEqual(db.execute("SELECT is_fund FROM instrument_classification WHERE symbol='طلا4'").fetchone()[0],1)
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM flows').fetchone()[0],1)
+
     def test_api_revisions_keep_archive_and_fund_filter_changes_all_queries(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);db_path=root/'data/archive.sqlite3';index.init_db(db_path)

@@ -35,3 +35,5 @@ MarketWatch fields: `insCode` ID, `lva` ticker, `lvc` company, `insID` trading i
 Each date is collected per instrument using dated endpoints, then reconciled before separate market aggregation. Historic primary aliases are the official ticker plus `1`; original suffixes remain distinct. This mapping was checked against archive tickers, but automatic rename joins are deliberately avoided. Current-universe membership introduces survivorship limits for older backfills. Excluding funds changes the same underlying rows for every analytics view and export.
 
 No actual-value field means no exact flow; do not silently substitute `(individual buy volume - individual sell volume) × closing price`. Missing records are reported as exclusions, not zero or stale values.
+
+Fund classification additionally uses type 380 commodity funds and fund-labelled type 306 records, solely for hiding their archive rows. This does not add commodity trades to the TSE/IFB feed. An identified fund’s observed numeric trade suffixes share its fund classification; their trade data remains separate.

@@ -125,13 +125,30 @@ class Client:
                 time.sleep(min(2**attempt,8))
 
 
-def classify(universe):
+def fund_catalog(payload):
+    # Classify commodity funds too, although their trades are outside this feed's market scope.
+    return [{'instrument_code':str(r['insCode']),'display_symbol':r['lva'].strip(),
+             'symbol':r['lva'].strip()+'1','is_fund':1,'security_type':int(r['yVal'])}
+            for r in payload['marketwatch'] if str(r.get('insID','')).endswith('1')
+            and (int(r.get('yVal',0)) in (305,380) or (int(r.get('yVal',0))==306 and 'صندوق' in r.get('lvc','')))]
+
+
+def classify(universe, funds=None):
     for market,db_path in [('tse',ROOT/'data/archive.sqlite3'),('ifb',ifb_archive.DB)]:
         with connect(db_path) as db:
             if market=='ifb':
                 db.execute("UPDATE flows SET is_fund=1 WHERE is_fund IS NULL AND EXISTS(SELECT 1 FROM ifb_metadata m WHERE m.workbook_sha=flows.workbook_sha AND m.symbol=flows.symbol AND instr(m.payload,'صندوق')>0)")
-            for item in universe:
-                if item['market']!=market:continue
+            items=[i for i in universe if i['market']==market]
+            items.extend(funds or [])
+            # Apply fund identity to every observed numeric trade suffix, without merging trade rows.
+            fund_by_ticker={normalize(i['display_symbol']):i for i in items if i['is_fund']}
+            for row in db.execute('SELECT DISTINCT symbol FROM flows'):
+                alias=normalize(row['symbol']);base=alias.rstrip('0123456789')
+                if base in fund_by_ticker:
+                    i=fund_by_ticker[base]
+                    db.execute('INSERT OR REPLACE INTO instrument_classification VALUES (?,?,?,?,?)',
+                        (alias,i['instrument_code'],1,i['security_type'],datetime.now(timezone.utc).isoformat()))
+            for item in items:
                 # Explicit current primary-market aliases; exact historical suffixes stay distinct.
                 for alias in (item['symbol'],item['display_symbol']):
                     db.execute('INSERT OR REPLACE INTO instrument_classification VALUES (?,?,?,?,?)',
@@ -185,7 +202,7 @@ def sync(start=CUTOVER,end=None,limit=0,rate=8,workers=4,ttl=3600):
         status={'phase':'discovering','started_at':now.isoformat(),'source':'tsetmc','processed':0,'requested_start':start.isoformat(),'requested_end':end.isoformat()}
         atomic_json(FOLDER/'status.json',status)
         try:
-            body,_=client.get('ClosingPrice/GetMarketWatch');universe=instruments(body);classify(universe)
+            body,_=client.get('ClosingPrice/GetMarketWatch');universe=instruments(body);classify(universe,fund_catalog(body))
             # Recheck recent dates; completed older dates need no repeated requests.
             checkpoint=read_json(FOLDER/'checkpoint.json',{})
             days=[];day=start

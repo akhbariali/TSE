@@ -245,7 +245,7 @@ The server-side 24-hour follow-up and its log were removed at the user’s reque
 
 New daily data comes from **actual individual purchase/sale values**, not volume multiplied by closing price. The existing TSE/IFB Excel files and revisions remain intact. On overlapping dates an accepted TSETMC snapshot takes priority in analytics; original Excel reports remain in the library. See [verified endpoints and source checks](docs/tsetmc-verification.md).
 
-**Hide funds · صندوق** in the period controls excludes funds from totals, charts, symbol lists/history and CSV exports, for either market. The preference is saved in the browser. Current TSETMC fund types, exact ticker aliases, archive company names and IFB fund labels supply classification. Unclassified historical funds can remain until identified. TSE and IFB are never combined.
+**Hide funds · صندوق** in the period controls excludes funds from totals, charts, symbol lists/history and CSV exports, for either market. The preference is saved in the browser. Current TSETMC fund types, ticker aliases across observed numeric trade suffixes (including commodity funds), archive company names and IFB fund labels supply classification. Unclassified historical funds can remain until identified. TSE and IFB are never combined.
 
 The feed covers primary shares, rights and exchange-traded funds, excluding secondary trade boards, debt and derivatives. It uses current membership, not a survivorship-free historical universe. Its totals can differ from an Excel report with a broader scope; source labels and retained-row counts are visible. Missing observations are not zero. A partial snapshot includes only validated instruments, with exclusions recorded in its Source JSON.
 
