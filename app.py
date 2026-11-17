@@ -24,6 +24,7 @@ from download_reports import read_json
 from index_reports import connect, init_db, normalize
 import ifb_archive
 import tsetmc_daily
+from retail_signals import assess
 from app_auth import SingleUserAuth, COOKIE, SESSION_SECONDS
 
 STATIC = ROOT / 'web/static'
@@ -204,6 +205,42 @@ def flow_query(db, query, export=False):
     return {'items': data, 'total': total, 'scope': scope_info(selected)}
 
 
+def recommendations(db, query):
+    # The period end is the analysis date. Earlier observations are context,
+    # even when the user chooses fewer than 25 reports in the visible window.
+    _, selected = selection(db, query)
+    if not selected:return {'items':[], 'as_of':None, 'assessed':0, 'insufficient':0, 'stale':0}
+    as_of=selected[-1]['date']
+    dates=rows(db,'SELECT date FROM active_reports WHERE date<=? ORDER BY date DESC LIMIT 60',[as_of])
+    data=rows(db,f'''SELECT f.symbol,f.company,f.turnover_rial,f.retail_net_rial,a.date,a.source,a.state AS report_state
+        FROM flows f JOIN active_reports a ON a.sha=f.workbook_sha
+        WHERE a.date BETWEEN ? AND ? AND f.turnover_rial>0 AND {fund_clause(query)}
+        AND f.symbol GLOB '*1' AND EXISTS(SELECT 1 FROM instrument_classification c
+          WHERE c.symbol=REPLACE(REPLACE(REPLACE(REPLACE(f.symbol,'ي','ی'),'ك','ک'),' ',''),'‌','')
+          AND c.security_type IN (300,303,309,313,400,403,404,305))
+        ORDER BY a.date,f.symbol''',[dates[-1]['date'],as_of])
+    histories={}
+    for row in data:
+        if not all(math.isfinite(row[k]) for k in ('turnover_rial','retail_net_rial')):continue
+        # Normalize Persian/Arabic letter variants, keeping all numeric suffixes distinct.
+        key=normalize(row['symbol']);histories.setdefault(key,[]).append(row)
+    candidates=[];assessed=insufficient=stale=0
+    for history in histories.values():
+        # Duplicate normalized spellings on one date are ambiguous, never double-count them.
+        if len({r['date'] for r in history})!=len(history):continue
+        result=assess(history,as_of)
+        if not result['eligible']:
+            if history[-1]['date']!=as_of:stale+=1
+            else:insufficient+=1
+            continue
+        assessed+=1
+        if result['recommended']:
+            candidates.append({**result,'symbol':history[-1]['symbol'],'company':history[-1]['company']})
+    candidates.sort(key=lambda r:(-r['score'],r['symbol']))
+    return {'items':candidates[:20],'total':len(candidates),'as_of':as_of,'assessed':assessed,
+            'insufficient':insufficient,'stale':stale,'context_reports':len(dates)}
+
+
 def reports(db, query):
     page = max(1, int(query.get('page', '1')))
     size = min(100, max(1, int(query.get('size', '20'))))
@@ -348,6 +385,8 @@ class Handler(BaseHTTPRequestHandler):
                     result = status(db, market)
                 elif route == '/api/flows':
                     result = flow_query(db, query)
+                elif route == '/api/recommendations':
+                    result = recommendations(db, query)
                 elif route == '/api/reports':
                     result = reports(db, query)
                 elif route == '/api/symbol':

@@ -37,3 +37,19 @@ Each date is collected per instrument using dated endpoints, then reconciled bef
 No actual-value field means no exact flow; do not silently substitute `(individual buy volume - individual sell volume) × closing price`. Missing records are reported as exclusions, not zero or stale values.
 
 Fund classification additionally uses type 380 commodity funds and fund-labelled type 306 records, solely for hiding their archive rows. This does not add commodity trades to the TSE/IFB feed. An identified fund’s observed numeric trade suffixes share its fund classification; their trade data remains separate.
+
+## Mofid EasyTrader reference check — 2026-11-16
+
+Compared the user's [saved شتران screenshot](references/mofid-shetran-1405-08-24.png) for **1405/08/24** with a fresh response from `ClientType/GetClientTypeHistory/51617145873056483/20261115` and the deployed SQLite active snapshot for that same day. Individual buy/sell values, actual net value, total volume and net individual volume matched exactly between SQLite and TSETMC.
+
+| Metric | Recomputed from official data | Screenshot |
+| --- | ---: | ---: |
+| Total traded volume | 385,669,169 | 385,669,169 |
+| Closing price, rial | 6,730 | 6,730 |
+| Net individual volume / total volume | 82.0335187% | 82% |
+| Per-buyer volume / per-seller volume | 34.5417375 | 34.54 |
+| Individual buy value / buyers, billion rial | 7.58163654 | 7.582 B rial |
+
+Source fields: individual buy volume 342,469,169; individual sell volume 26,091,179; individual buyers 304; individual sellers 800. Net volume is 316,377,990. Stored actual net individual value is 2,129,223,872,700 rials = **212.92238727 billion toman** = **0.21292238727 trillion toman**.
+
+These exact rounded matches support the screenshot's current-day metrics. Inference: its approximately +82 final chart bar appears to be the net-volume percentage, whereas our existing cash-flow bars show actual net value in trillion toman. Their heights are not directly comparable. No tooltip, historical point export or documented chart formula was available, so a full historical Mofid chart match has not been established. Existing charts/calculations remain unchanged.
