@@ -1,0 +1,67 @@
+[
+  {
+    "symbol": "آرام",
+    "market": "tse",
+    "date": "1405/08/25",
+    "volume": 2580605,
+    "closing_rial": 53402.0,
+    "actual_net_billion_rial": -12.372115794,
+    "mofid_net_billion_rial": -12.419,
+    "closing_price_proxy_billion_rial": -12.418314688,
+    "live_api_matches_stored": true,
+    "mofid_volume_and_turnover_match": true,
+    "mofid_proxy_matches_round_away": true
+  },
+  {
+    "symbol": "آوند",
+    "market": "ifb",
+    "date": "1405/08/25",
+    "volume": 675585438,
+    "closing_rial": 31900.0,
+    "actual_net_billion_rial": 196.120086322,
+    "mofid_net_billion_rial": 196.145,
+    "closing_price_proxy_billion_rial": 196.1446465,
+    "live_api_matches_stored": true,
+    "mofid_volume_and_turnover_match": true,
+    "mofid_proxy_matches_round_away": true
+  },
+  {
+    "symbol": "اطلس",
+    "market": "ifb",
+    "date": "1405/08/25",
+    "volume": 10386405,
+    "closing_rial": 195762.0,
+    "actual_net_billion_rial": 750.363204144,
+    "mofid_net_billion_rial": 749.357,
+    "closing_price_proxy_billion_rial": 749.356185228,
+    "live_api_matches_stored": true,
+    "mofid_volume_and_turnover_match": true,
+    "mofid_proxy_matches_round_away": true
+  },
+  {
+    "symbol": "توان",
+    "market": "ifb",
+    "date": "1405/08/25",
+    "volume": 85575113,
+    "closing_rial": 91614.0,
+    "actual_net_billion_rial": -15.102161867,
+    "mofid_net_billion_rial": -13.633,
+    "closing_price_proxy_billion_rial": -13.632346428,
+    "live_api_matches_stored": true,
+    "mofid_volume_and_turnover_match": true,
+    "mofid_proxy_matches_round_away": true
+  },
+  {
+    "symbol": "سیمانو",
+    "market": "tse",
+    "date": "1405/08/25",
+    "volume": 13781232,
+    "closing_rial": 51934.0,
+    "actual_net_billion_rial": -556.655402748,
+    "mofid_net_billion_rial": -557.041,
+    "closing_price_proxy_billion_rial": -557.040137016,
+    "live_api_matches_stored": true,
+    "mofid_volume_and_turnover_match": true,
+    "mofid_proxy_matches_round_away": true
+  }
+]

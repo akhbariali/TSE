@@ -40,7 +40,7 @@ Fund classification additionally uses type 380 commodity funds and fund-labelled
 
 ## Mofid EasyTrader reference check — 2026-11-16
 
-Compared the user's [saved شتران screenshot](references/mofid-shetran-1405-08-24.png) for **1405/08/24** with a fresh response from `ClientType/GetClientTypeHistory/51617145873056483/20261115` and the deployed SQLite active snapshot for that same day. Individual buy/sell values, actual net value, total volume and net individual volume matched exactly between SQLite and TSETMC.
+Compared the user's saved شتران screenshot (local reference; excluded from Git because it includes account details) for **1405/08/24** with a fresh response from `ClientType/GetClientTypeHistory/51617145873056483/20261115` and the deployed SQLite active snapshot for that same day. Individual buy/sell values, actual net value, total volume and net individual volume matched exactly between SQLite and TSETMC.
 
 | Metric | Recomputed from official data | Screenshot |
 | --- | ---: | ---: |
@@ -53,3 +53,27 @@ Compared the user's [saved شتران screenshot](references/mofid-shetran-1405-
 Source fields: individual buy volume 342,469,169; individual sell volume 26,091,179; individual buyers 304; individual sellers 800. Net volume is 316,377,990. Stored actual net individual value is 2,129,223,872,700 rials = **212.92238727 billion toman** = **0.21292238727 trillion toman**.
 
 These exact rounded matches support the screenshot's current-day metrics. Inference: its approximately +82 final chart bar appears to be the net-volume percentage, whereas our existing cash-flow bars show actual net value in trillion toman. Their heights are not directly comparable. No tooltip, historical point export or documented chart formula was available, so a full historical Mofid chart match has not been established. Existing charts/calculations remain unchanged.
+
+## Five live Mofid spot checks — 2026-11-16 / 1405/08/25
+
+Used the user's signed-in EasyTrader session, selecting five instruments randomly without replacement from the supported instruments visible in the Mofid watchlist: آوند, اطلس, آرام, توان, سیمانو. This particular sample consists of funds (two TSE, three IFB), not a representative sample of every equity or historical date. No orders or account settings were changed.
+
+Compared the matching 1405/08/25 active SQLite records with Mofid's instrument detail panels, and fetched fresh dated TSETMC ClientType responses independently. All five stored individual purchase/sale values, volumes and investor counts matched the fresh official records. Mofid's total volume and exact turnover matched our records; individual/institutional counts and volumes matched to its displayed precision. Closing prices matched the visible Mofid prices.
+
+| Instrument | Volume | Closing, rial | Our actual net, billion rial | Mofid displayed net, billion rial |
+| --- | ---: | ---: | ---: | ---: |
+| آرام | 2,580,605 | 53,402 | -12.372115794 | -12.419 |
+| آوند | 675,585,438 | 31,900 | 196.120086322 | 196.145 |
+| اطلس | 10,386,405 | 195,762 | 750.363204144 | 749.357 |
+| توان | 85,575,113 | 91,614 | -15.102161867 | -13.633 |
+| سیمانو | 13,781,232 | 51,934 | -556.655402748 | -557.041 |
+
+**Metric distinction established by the sample:** all five Mofid displayed flow figures reproduce `(individual buy volume - individual sell volume) × displayed closing price`, scaled to billions of rials and rounded away from zero to three decimals. This is an inference from the five observed results, not inspected Mofid source code or a contractual API definition. Our flow remains actual `buy_I_Value - sell_I_Value`; changing it to force numerical agreement would replace actual transaction values with a closing-price estimate. توان illustrates the distinction clearly: actual −15.102161867 billion rials versus Mofid −13.633 billion rials. Different prices across executed buys and sells can produce this difference.
+
+Derived net-volume percentages, buying-power ratios and per-buyer closing-price estimates were also consistent with the displayed figures and rounding. The earlier Avand per-buyer apparent difference (2.792 B versus computed 2.791146833 B) is explained by rounding away from zero, not a different buyer count.
+
+A supplementary شتران check on the same date showed matching ClientType volumes/counts and a matching closing-price flow proxy. Its Mofid header volume (1,319,486,591) differed from both Mofid's detailed investor-volume total and its supplementary information volume (1,263,475,888), which matched our dated feed. The broader header discrepancy has not been explained; do not claim every displayed Mofid volume is identical. The five randomly selected fund totals did not show this discrepancy.
+
+[Machine-readable results](mofid-spot-check-1405-08-25.json) retain only public market figures, with no personal account/order details. The checks do not establish a full historical chart match or certify all records.
+
+The deployed `tse-daily.timer` was enabled and its most recent 20:30 Tehran execution succeeded (service result success, exit 0). Installed calendar entries are 20:30, 22:30 and 08:00 Asia/Tehran, with Persistent=true. The collector rechecks recent dates and unresolved dates; it does not manufacture Thursday/Friday sessions. No collection code or app behavior was changed during this verification.

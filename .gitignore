@@ -27,3 +27,6 @@ venv/
 .impeccable/mocks/
 node_modules/
 .DS_Store
+
+# Private account details in the user-provided Mofid reference.
+/docs/references/mofid-shetran-1405-08-24.png

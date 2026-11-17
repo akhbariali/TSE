@@ -271,6 +271,8 @@ Records require matching instrument/date and balanced purchase/sale values and v
 
 Net flow in rials = `buy_I_Value - sell_I_Value`; divide by **10,000,000,000** for billion toman. Existing chart `T` labels mean **trillion toman**, dividing by 10¹³. Average traded price remains traded value ÷ volume, in rials.
 
+Future research ideas and the saved Mofid شتران comparison are tracked in [future development notes](docs/future-development.md).
+
 ## Retail buying recommendations
 
 The recommendations panel in Overview and Symbol explorer ranks research candidates by unusual or sustained **net retail value / trading value**, relative to each instrument's own history; a volume increase is not required. It compares five observed sessions with the preceding twenty and exposes the reasons, buying-session count, ratios, score, source transitions and partial-report coverage. Open **Criteria and coverage** for the exact initial thresholds. These thresholds are heuristics, not calibrated return predictions. Funds follow the existing Hide funds preference, markets remain separate, and missing/latest-date or insufficient observations cannot produce recommendations. Baseline context can extend before the selected visible period; the selected end date prevents future-data leakage. See [Mofid sample verification](docs/tsetmc-verification.md#mofid-easytrader-reference-check--2026-11-16).
