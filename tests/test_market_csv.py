@@ -45,6 +45,9 @@ class ExportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);self.seed(root)
             path=Path(export.export_all(root)['file']);before=path.read_bytes()
+            (root/'data/ifb-current.json').write_text(json.dumps({'date':'1405/08/27','market':'ifb','records':[]}))
+            with self.assertRaisesRegex(ValueError,'absent'):export.export_all(root)
+            self.assertEqual(path.read_bytes(),before)
             (root/'data/ifb-current.json').unlink()
             with self.assertRaises(FileNotFoundError):export.export_all(root)
             self.assertEqual(path.read_bytes(),before)

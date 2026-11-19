@@ -47,7 +47,7 @@ def market_rows(root,market,path):
                       WHERE p.date=? ORDER BY COALESCE(w.report_id,0) DESC,w.indexed_at DESC''',(report['date'],)):
                         prices.setdefault(price['symbol'],price)
             for flow in db.execute('SELECT * FROM flows WHERE workbook_sha=? ORDER BY symbol',(report['sha'],)):
-                source=api.get(flow['symbol']) if api else metadata.get(flow['symbol'],{})
+                source=api.get(flow['symbol']) if report['source']=='tsetmc' else metadata.get(flow['symbol'],{})
                 if report['source']=='tsetmc' and source is None:raise ValueError('Flow absent from original API snapshot')
                 source=source or {};row={key:flow[key] for key in flow.keys() if key in FIELDS}
                 extra={}
