@@ -11,7 +11,7 @@ WorkingDirectory=/opt/tse
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 /opt/tse/scripts/tsetmc_daily.py
-ExecStartPost=/usr/bin/python3 /opt/tse/scripts/export_market_csv.py
+ExecStartPost=/usr/bin/python3 /opt/tse/scripts/refresh_recommendations.py
 TimeoutStartSec=2h
 UMask=0027
 NoNewPrivileges=true

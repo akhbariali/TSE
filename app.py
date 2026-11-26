@@ -205,6 +205,16 @@ def flow_query(db, query, export=False):
     return {'items': data, 'total': total, 'scope': scope_info(selected)}
 
 
+def recommendation_rows(db, query, start, end):
+    return rows(db,f'''SELECT f.symbol,f.company,f.turnover_rial,f.retail_net_rial,a.date,a.source,a.state AS report_state
+        FROM flows f JOIN active_reports a ON a.sha=f.workbook_sha
+        WHERE a.date BETWEEN ? AND ? AND f.turnover_rial>0 AND {fund_clause(query)}
+        AND f.symbol GLOB '*1' AND EXISTS(SELECT 1 FROM instrument_classification c
+          WHERE c.symbol=REPLACE(REPLACE(REPLACE(REPLACE(f.symbol,'ي','ی'),'ك','ک'),' ',''),'‌','')
+          AND c.security_type IN (300,303,309,313,400,403,404,305))
+        ORDER BY a.date,f.symbol''',[start,end])
+
+
 def recommendations(db, query):
     # The period end is the analysis date. Earlier observations are context,
     # even when the user chooses fewer than 25 reports in the visible window.
@@ -212,13 +222,7 @@ def recommendations(db, query):
     if not selected:return {'items':[], 'as_of':None, 'assessed':0, 'insufficient':0, 'stale':0}
     as_of=selected[-1]['date']
     dates=rows(db,'SELECT date FROM active_reports WHERE date<=? ORDER BY date DESC LIMIT 60',[as_of])
-    data=rows(db,f'''SELECT f.symbol,f.company,f.turnover_rial,f.retail_net_rial,a.date,a.source,a.state AS report_state
-        FROM flows f JOIN active_reports a ON a.sha=f.workbook_sha
-        WHERE a.date BETWEEN ? AND ? AND f.turnover_rial>0 AND {fund_clause(query)}
-        AND f.symbol GLOB '*1' AND EXISTS(SELECT 1 FROM instrument_classification c
-          WHERE c.symbol=REPLACE(REPLACE(REPLACE(REPLACE(f.symbol,'ي','ی'),'ك','ک'),' ',''),'‌','')
-          AND c.security_type IN (300,303,309,313,400,403,404,305))
-        ORDER BY a.date,f.symbol''',[dates[-1]['date'],as_of])
+    data=recommendation_rows(db,query,dates[-1]['date'],as_of)
     histories={}
     for row in data:
         if not all(math.isfinite(row[k]) for k in ('turnover_rial','retail_net_rial')):continue
@@ -239,6 +243,73 @@ def recommendations(db, query):
     candidates.sort(key=lambda r:(-r['score'],r['symbol']))
     return {'items':candidates[:20],'total':len(candidates),'as_of':as_of,'assessed':assessed,
             'insufficient':insufficient,'stale':stale,'context_reports':len(dates)}
+
+
+MODEL_DB=ROOT/'data/recommendations/closing-model.sqlite3'
+
+
+def model_recommendations(db, query, history=False):
+    _,selected=selection(db,query)
+    as_of=selected[-1]['date'] if selected else None
+    result={'items':[], 'as_of':as_of, 'metadata':None, 'status':'unavailable'}
+    if not MODEL_DB.is_file():return result
+    market=query.get('_market','tse')
+    with sqlite3.connect(MODEL_DB.resolve().as_uri()+'?mode=ro',uri=True) as model:
+        model.row_factory=sqlite3.Row
+        result['metadata']=json.loads(model.execute('SELECT payload FROM metadata').fetchone()[0])
+        if not selected:return result
+        scores=rows(model,"""SELECT * FROM scores WHERE market=? AND date BETWEEN ? AND ?
+            ORDER BY date,probability DESC,symbol""",
+            [market,selected[0]['date'] if history else as_of,as_of])
+    known_funds={r['symbol'] for r in rows(db,'SELECT symbol FROM instrument_classification WHERE is_fund=1')} if exclude_funds(query) else set()
+    ranks={};items=[]
+    for row in scores:
+        company=row.get('company','').replace(' ','').replace('‌','') if row.get('company') else ''
+        symbol=row['symbol'].replace('ي','ی').replace('ك','ک').replace(' ','').replace('‌','')
+        if exclude_funds(query) and (row['is_fund'] or symbol in known_funds or 'صندوق' in company or 'ص.س' in company):continue
+        ranks[row['date']]=ranks.get(row['date'],0)+1;row['rank']=ranks[row['date']]
+        if row['rank']<=10 and (not history or row['symbol']==query.get('symbol')):items.append(row)
+    result['items']=items
+    result['status']='ready' if scores else 'no_scores'
+    result['stale']=as_of>result['metadata']['data_through']
+    return result
+
+
+def recommendation_history(db, query):
+    """Reconstruct the actual top-20 retail list on each visible report date."""
+    _,selected=selection(db,query)
+    if not selected:return {'retail':[], 'model':model_recommendations(db,query,True)}
+    as_of=selected[-1]['date'];first=selected[0]['date']
+    context=rows(db,'SELECT date FROM active_reports WHERE date<=? ORDER BY date DESC LIMIT 59',[first])
+    dates=[r['date'] for r in rows(db,'SELECT date FROM active_reports WHERE date BETWEEN ? AND ? ORDER BY date',[context[-1]['date'],as_of])]
+    positions={date:i for i,date in enumerate(dates)};histories={};by_date={}
+    for row in recommendation_rows(db,query,dates[0],as_of):by_date.setdefault(row['date'],[]).append(row)
+    retail=[];symbol=query.get('symbol','')
+    for date in dates:
+        for row in by_date.get(date,[]):
+            if all(math.isfinite(row[k]) for k in ('turnover_rial','retail_net_rial')):
+                histories.setdefault(normalize(row['symbol']),[]).append(row)
+        if date<first:continue
+        candidates=[]
+        for history in histories.values():
+            if history[-1]['date']!=date:continue
+            window=[r for r in history if positions[r['date']]>=positions[date]-59]
+            if len({r['date'] for r in window})!=len(window):continue
+            result=assess(window,date)
+            if result.get('recommended'):candidates.append({**result,'symbol':history[-1]['symbol']})
+        candidates.sort(key=lambda r:(-r['score'],r['symbol']))
+        for rank,row in enumerate(candidates[:20],1):
+            if row['symbol']==symbol:retail.append({**row,'date':date,'rank':rank})
+    observed=rows(db,'''SELECT a.date,f.turnover_rial/NULLIF(f.volume,0) AS price
+        FROM flows f JOIN active_reports a ON a.sha=f.workbook_sha WHERE f.symbol=? ORDER BY a.date''',[symbol])
+    prices={r['date']:r['price'] for r in observed}
+    all_dates=[r['date'] for r in rows(db,'SELECT date FROM active_reports ORDER BY date')]
+    next_dates=dict(zip(all_dates,all_dates[1:]))
+    for signal in retail:
+        signal['next_date']=next_dates.get(signal['date'])
+        current=prices.get(signal['date']);following=prices.get(signal['next_date'])
+        signal['next_return']=following/current-1 if current and following else None
+    return {'retail':retail,'model':model_recommendations(db,query,True)}
 
 
 def reports(db, query):
@@ -387,6 +458,10 @@ class Handler(BaseHTTPRequestHandler):
                     result = flow_query(db, query)
                 elif route == '/api/recommendations':
                     result = recommendations(db, query)
+                elif route == '/api/model-recommendations':
+                    result = model_recommendations(db, query)
+                elif route == '/api/recommendation-history':
+                    result = recommendation_history(db, query)
                 elif route == '/api/reports':
                     result = reports(db, query)
                 elif route == '/api/symbol':
@@ -457,7 +532,7 @@ class Handler(BaseHTTPRequestHandler):
             # The collector's OS lock serializes manual and scheduled runs.
             (ROOT/'data/tsetmc').mkdir(parents=True,exist_ok=True)
             with (ROOT/'data/tsetmc/sync.log').open('a') as log:
-                subprocess.Popen([sys.executable,str(ROOT/'scripts/tsetmc_daily.py')],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
+                subprocess.Popen([sys.executable,str(ROOT/'scripts/refresh_recommendations.py'),'--collect'],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
             return self.send({'started':True,'message':'TSETMC daily update started for TSE and IFB.'},202)
         if endpoint=='/api/ifb/sync':
             if self.headers.get('X-TSE-Request') != 'sync' or (self.headers.get('Origin') and urlsplit(self.headers['Origin']).netloc != self.headers.get('Host')):

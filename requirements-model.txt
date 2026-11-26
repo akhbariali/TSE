@@ -1,0 +1,5 @@
+# Optional offline trainer; the web application remains standard-library only.
+pandas>=2.2,<4
+numpy>=1.26,<3
+lightgbm>=4.6,<5
+scikit-learn>=1.6,<2
