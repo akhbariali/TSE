@@ -1,5 +1,6 @@
 """Private shared-portfolio unit accounting. All monetary inputs are tomans."""
 from decimal import Decimal, InvalidOperation
+from contextlib import contextmanager
 import json
 import re
 from pathlib import Path
@@ -102,11 +103,16 @@ def calculate(book):
             'unit_price': float(unit_price) if unit_price is not None else None, 'ready': ready}
 
 
+@contextmanager
 def storage():
     DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB)
-    db.execute('CREATE TABLE IF NOT EXISTS books (revision INTEGER PRIMARY KEY, document TEXT NOT NULL)')
-    return db
+    try:
+        with db:
+            db.execute('CREATE TABLE IF NOT EXISTS books (revision INTEGER PRIMARY KEY, document TEXT NOT NULL)')
+            yield db
+    finally:
+        db.close()
 
 
 def load():
