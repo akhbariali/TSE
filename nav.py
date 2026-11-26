@@ -77,6 +77,8 @@ def calculate(book):
             included += value
         details.append({'symbol': h['symbol'], 'value': float(value), 'personal': personal})
     confirmed = book.get('confirmed') is True
+    if type(book.get('estimated', False)) is not bool:
+        raise ValueError('Estimated valuation must be true or false.')
     as_of = book.get('as_of', '')
     if not isinstance(as_of, str) or len(as_of) > 100 or not isinstance(book.get('note', ''), str) or len(book.get('note', '')) > 4000:
         raise ValueError('Invalid valuation date or note.')
@@ -129,6 +131,7 @@ def balances():
     data = load()
     owner = data['book'].get('owner', 'Me')
     return {'as_of': data['book'].get('as_of', ''), 'ready': data['result']['ready'],
+            'estimated': data['book'].get('estimated', False),
             'people': [{key: person[key] for key in ('person', 'net_contributed', 'value', 'profit')}
                        for person in data['result']['people'] if person['person'] != owner]}
 

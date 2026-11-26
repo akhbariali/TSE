@@ -68,12 +68,14 @@ class NavTests(unittest.TestCase):
     def test_investor_response_contains_only_other_peoples_balances(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(nav, 'DB', Path(folder)/'nav.db'):
             book = self.book()
+            book['estimated'] = True
             book['note'] = 'Private owner notes'
             nav.save({'revision': 0, 'book': book})
             response = nav.balances()
             self.assertEqual(response['people'], [{'person': 'Person 2', 'net_contributed': 5000000,
                                                   'value': 6000000, 'profit': 1000000}])
-            self.assertEqual(set(response), {'people', 'ready', 'as_of'})
+            self.assertEqual(set(response), {'people', 'ready', 'as_of', 'estimated'})
+            self.assertTrue(response['estimated'])
             book['confirmed'] = False
             book['owner'] = 'Person 2'
             nav.save({'revision': 1, 'book': book})

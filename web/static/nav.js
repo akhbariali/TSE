@@ -15,12 +15,12 @@ async function renderNav(version){
  const data=await navRequest();if(version!==routeVersion)return;navDocument=data;drawNav();
 }
 function balancePage(data){
- const money=value=>value==null?'Not calculated yet':num(value,2)+' tomans';
+ const money=value=>value==null?'Not calculated yet':num(value,0)+' tomans';
  return heading('Investor balances','Current money belonging to each investor')+
  (data.people.length?data.people.map(person=>`<section class="panel investor-balance">
- <h2>${esc(person.person)}</h2><p class="balance-label">Money now</p>
+ <h2>${esc(person.person)}</h2><p class="balance-label">${data.estimated?'Estimated money now':'Money now'}</p>
  <strong class="balance-amount">${money(person.value)}</strong>
- ${person.value==null?'<p class="balance-explanation">The current balance is not confirmed yet. The recorded contribution below is the starting investment, not today’s balance.</p>':`<p class="balance-explanation">As of ${esc(data.as_of)}. This is the latest saved valuation.</p>`}
+ ${person.value==null?'<p class="balance-explanation">The current balance is not confirmed yet. The recorded contribution below is the starting investment, not today’s balance.</p>':`<p class="balance-explanation">As of ${esc(data.as_of)}. ${data.estimated?'Estimate using daily closing prices when later money was added.':'This is the latest saved valuation.'}</p>`}
  <dl class="balance-breakdown"><div><dt>Net money invested</dt><dd>${money(person.net_contributed)}</dd></div><div><dt>Profit / loss</dt><dd class="${cls(person.profit)}">${money(person.profit)}</dd></div></dl>
  ${person.value!=null?'<p class="table-note">Money now = net money invested + profit / loss.</p>':'<p class="table-note">The calculation needs the shared cash balance and later contributions to be completed.</p>'}
  </section>`).join(''):empty('No investor balances','No other investors have been recorded.'));
@@ -40,6 +40,7 @@ function drawNav(){
  <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Current value · toman</th><th>Personal / excluded</th><th>Action</th></tr></thead><tbody id="nav-holdings">${b.holdings.map((h,i)=>`<tr data-holding><td>${input('Symbol '+(i+1),h.symbol,'symbol')}</td><td>${input('Holding value '+(i+1),h.value,'value','number')}</td><td><input type="checkbox" data-key="personal" aria-label="Personal holding ${i+1}" ${h.personal||['وتوصا','خاور','خصدرا','توان','آب','کاوان','vetoosa','khavar','khesadra','tavan','ab','kavan'].includes(h.symbol.replace(/[\s\u200c]/g,'').replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/[1۱]$/,'').toLowerCase())?'checked':''}></td><td><button type="button" class="button secondary" data-remove-holding="${i}">Remove</button></td></tr>`).join('')}</tbody></table></div>
  <button class="button secondary" type="button" id="nav-add-holding">Add holding</button><p class="table-note">Always excluded: وتوصا، خاور، خصدرا، توان، آب، کاوان (and their symbol aliases). Other holdings are shared unless marked personal.</p>
  <label class="field section-gap">Source / reconciliation notes<textarea id="nav-note" rows="3">${esc(b.note||'')}</textarea></label>
+ <label class="fund-filter section-gap"><input id="nav-estimated" type="checkbox" ${b.estimated?'checked':''}>Estimate using daily closing prices for contribution timing.</label>
  <label class="fund-filter section-gap"><input id="nav-confirmed" type="checkbox" ${b.confirmed?'checked':''}>I have reconciled shared assets, cash, liabilities, and all contributions for this snapshot.</label></section>
  <section class="panel nav-editor section-gap"><h2>Contributions & withdrawals</h2><p class="table-note">Opening contributions: 5,000,000 tomans each at 1 toman per unit. For later flows, enter the NAV immediately BEFORE the flow, not today’s NAV. Positive amounts buy units; negative amounts redeem units. Keep entries in chronological order. Add a person by entering a new name.</p>
  <div class="table-wrap"><table><thead><tr><th>Person</th><th>Date · YYYY/MM/DD</th><th>Amount · toman</th><th>Entry NAV · toman/unit</th><th>Action</th></tr></thead><tbody>${b.flows.map((f,i)=>`<tr data-flow>${[['person','text'],['date','text'],['amount','number'],['unit_price','number']].map(([key,type])=>`<td>${input(key+' '+(i+1),f[key],key,type)}</td>`).join('')}<td><button type="button" class="button secondary" data-remove-flow="${i}">Remove</button></td></tr>`).join('')}</tbody></table></div><button class="button secondary" type="button" id="nav-add-flow">Add cash flow</button></section>
@@ -51,7 +52,7 @@ function drawNav(){
   b.people=[...new Set(b.flows.map(f=>f.person))];
   b.owner=$('#nav-owner').value;
   for(const key of ['cash','liabilities','as_of'])b[key]=content.querySelector(`[data-key="${key}"]`).value;
-  b.note=$('#nav-note').value;b.confirmed=$('#nav-confirmed').checked;
+  b.note=$('#nav-note').value;b.confirmed=$('#nav-confirmed').checked;b.estimated=$('#nav-estimated').checked;
  };
  const edit=change=>{collect();change();drawNav();$('#nav-save-status').textContent='Unsaved changes. Save to recalculate.';};
  $('#nav-add-holding').onclick=()=>edit(()=>b.holdings.push({symbol:'',value:'0',personal:false}));
