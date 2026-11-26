@@ -40,6 +40,8 @@ class LoginTests(unittest.TestCase):
         self.assertEqual(self.request('/')[0],303)
         self.assertEqual(self.request('/nav')[0],303)
         self.assertEqual(self.request('/api/nav')[0],401)
+        self.assertEqual(self.request('/api/nav/balances')[0],401)
+        self.assertEqual(self.request('/nav/manage')[0],303)
         self.assertEqual(self.request('/api/nav','POST')[0],401)
         for path in ['/api/status','/api/ifb/status','/api/files/unknown','/api/ifb/files/unknown','/api/export/flows','/static/app.js']:
             self.assertIn(self.request(path)[0],(303,401))
@@ -81,6 +83,11 @@ class LoginTests(unittest.TestCase):
         request_headers = {'Cookie': headers['Set-Cookie'].split(';')[0], 'Content-Type': 'application/json'}
         with tempfile.TemporaryDirectory() as folder, patch.object(app.nav, 'DB', Path(folder)/'nav.sqlite3'):
             self.assertEqual(self.request('/nav', headers=request_headers)[0], 200)
+            self.assertEqual(self.request('/nav/manage', headers=request_headers)[0], 200)
+            code, _, balance_body = self.request('/api/nav/balances', headers=request_headers)
+            self.assertEqual(code, 200)
+            self.assertEqual([p['person'] for p in json.loads(balance_body)['people']], ['Person 2'])
+            self.assertNotIn('holdings', json.loads(balance_body))
             self.assertEqual(self.request('/static/nav.js', headers=request_headers)[0], 200)
             code, _, body = self.request('/api/nav', headers=request_headers)
             self.assertEqual(code, 200)

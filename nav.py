@@ -15,7 +15,7 @@ def symbol_key(value):
 
 
 def default_book():
-    return {'people': ['Me', 'Person 2'], 'flows': [
+    return {'owner': 'Me', 'people': ['Me', 'Person 2'], 'flows': [
         {'person': 'Me', 'date': '', 'amount': '5000000', 'unit_price': '1'},
         {'person': 'Person 2', 'date': '', 'amount': '5000000', 'unit_price': '1'}],
         'holdings': [], 'cash': '', 'liabilities': '0', 'as_of': '', 'confirmed': False,
@@ -40,6 +40,8 @@ def calculate(book):
     people, flows, holdings = book.get('people'), book.get('flows'), book.get('holdings')
     if not isinstance(people, list) or not 1 <= len(people) <= 100 or any(not isinstance(p, str) or not p.strip() or len(p) > 100 for p in people) or len(set(people)) != len(people):
         raise ValueError('Provide unique participant names.')
+    if book.get('owner', 'Me') not in people:
+        raise ValueError('Select your participant so your balance stays private.')
     if not isinstance(flows, list) or len(flows) > 5000 or not isinstance(holdings, list) or len(holdings) > 500:
         raise ValueError('Invalid ledger size.')
     balances = {p: {'units': Decimal(0), 'net_contributed': Decimal(0)} for p in people}
@@ -120,6 +122,15 @@ def load():
         row = db.execute('SELECT revision,document FROM books ORDER BY revision DESC LIMIT 1').fetchone()
     book = json.loads(row[1]) if row else default_book()
     return {'revision': row[0] if row else 0, 'book': book, 'result': calculate(book)}
+
+
+def balances():
+    """Balance-page response deliberately omits owner and portfolio information."""
+    data = load()
+    owner = data['book'].get('owner', 'Me')
+    return {'as_of': data['book'].get('as_of', ''), 'ready': data['result']['ready'],
+            'people': [{key: person[key] for key in ('person', 'net_contributed', 'value', 'profit')}
+                       for person in data['result']['people'] if person['person'] != owner]}
 
 
 def save(payload):

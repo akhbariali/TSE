@@ -449,10 +449,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.login_page()
             if route != '/static/style.css' and not self.require_login():
                 return
-            if route in ('/', '/index.html', '/nav'):
+            if route in ('/', '/index.html', '/nav', '/nav/manage'):
                 return self.send((STATIC/'index.html').read_bytes(), content_type='text/html; charset=utf-8')
             if route == '/api/nav':
                 return self.send(nav.load())
+            if route == '/api/nav/balances':
+                return self.send(nav.balances())
             if route.startswith('/static/'):
                 name = route.removeprefix('/static/')
                 allowed = {'nav.js': 'text/javascript', 'app.js': 'text/javascript', 'style.css': 'text/css'}
