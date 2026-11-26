@@ -36,20 +36,22 @@ class HistoryTests(unittest.TestCase):
             scores=Path(folder)/'model.sqlite3'
             with sqlite3.connect(scores) as model:
                 model.execute('CREATE TABLE metadata(payload TEXT)')
-                model.execute('INSERT INTO metadata VALUES (?)',(json.dumps({'data_through':'1405/08/25'}),))
+                model.execute('INSERT INTO metadata VALUES (?)',(json.dumps({'data_through':'1405/08/25','target_kind':'stock_net_positive_v1'}),))
                 model.execute('CREATE TABLE scores(market TEXT,date TEXT,symbol TEXT,is_fund INTEGER,probability REAL)')
                 for market in ['tse','ifb']:
-                    for i in range(12):
+                    for i in range(60):
                         model.execute('INSERT INTO scores VALUES (?,?,?,?,?)',(market,'1405/08/25',f's{i:02}',int(i==0),1-i*.01))
             with index.connect(path) as db,patch.object(app,'MODEL_DB',scores):
                 db.execute("INSERT INTO workbooks(sha,file,date,state) VALUES ('a','a','1405/08/25','ready')")
                 result=app.model_recommendations(db,{'window':'all','exclude_funds':'1'})
-                self.assertEqual(len(result['items']),10)
+                self.assertEqual(len(result['items']),50)
                 self.assertEqual(result['items'][0]['symbol'],'s01')
                 self.assertEqual({r['market'] for r in result['items']},{'tse'})
-                self.assertEqual(app.model_recommendations(db,{'window':'all','symbol':'s11'},True)['items'],[])
+                self.assertEqual(app.model_recommendations(db,{'window':'all','symbol':'s55'},True)['items'],[])
                 signal=app.model_recommendations(db,{'window':'all','symbol':'s05','_market':'ifb'},True)['items']
                 self.assertEqual(len(signal),1);self.assertEqual(signal[0]['rank'],6)
+                expanded=app.model_recommendations(db,{'window':'all','symbol':'s45'},True)['items']
+                self.assertEqual(expanded[0]['rank'],46)
                 db.execute("INSERT INTO workbooks(sha,file,date,state) VALUES ('b','b','1405/08/26','ready')")
                 stale=app.model_recommendations(db,{'window':'all'})
                 self.assertEqual(stale['items'],[]);self.assertTrue(stale['stale'])

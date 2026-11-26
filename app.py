@@ -24,6 +24,7 @@ from download_reports import read_json
 from index_reports import connect, init_db, normalize
 import ifb_archive
 import tsetmc_daily
+from trading_fees import BUY, SELL, SOURCE, TARGET_KIND, STOCK_TYPES, break_even, net_return
 from retail_signals import assess
 from app_auth import SingleUserAuth, COOKIE, SESSION_SECONDS
 
@@ -257,6 +258,8 @@ def model_recommendations(db, query, history=False):
     with sqlite3.connect(MODEL_DB.resolve().as_uri()+'?mode=ro',uri=True) as model:
         model.row_factory=sqlite3.Row
         result['metadata']=json.loads(model.execute('SELECT payload FROM metadata').fetchone()[0])
+        if result['metadata'].get('target_kind')!=TARGET_KIND:
+            result.update(metadata=None,status='refreshing');return result
         if not selected:return result
         scores=rows(model,"""SELECT * FROM scores WHERE market=? AND date BETWEEN ? AND ?
             ORDER BY date,probability DESC,symbol""",
@@ -268,7 +271,9 @@ def model_recommendations(db, query, history=False):
         symbol=row['symbol'].replace('ي','ی').replace('ك','ک').replace(' ','').replace('‌','')
         if exclude_funds(query) and (row['is_fund'] or symbol in known_funds or 'صندوق' in company or 'ص.س' in company):continue
         ranks[row['date']]=ranks.get(row['date'],0)+1;row['rank']=ranks[row['date']]
-        if row['rank']<=10 and (not history or row['symbol']==query.get('symbol')):items.append(row)
+        row.update(buy_fee=BUY[market],sell_fee=SELL,break_even=break_even(market),
+            next_net_return=net_return(row['next_return'],market) if row.get('next_return') is not None else None)
+        if row['rank']<=50 and (not history or row['symbol']==query.get('symbol')):items.append(row)
     result['items']=items
     result['status']='ready' if scores else 'no_scores'
     result['stale']=as_of>result['metadata']['data_through']
@@ -309,6 +314,12 @@ def recommendation_history(db, query):
         signal['next_date']=next_dates.get(signal['date'])
         current=prices.get(signal['date']);following=prices.get(signal['next_date'])
         signal['next_return']=following/current-1 if current and following else None
+        key=symbol.replace('ي','ی').replace('ك','ک').replace(' ','').replace('‌','')
+        classification=db.execute('SELECT security_type,is_fund FROM instrument_classification WHERE symbol=?',[key]).fetchone()
+        market=query.get('_market','tse')
+        known_stock=classification and classification['security_type'] in STOCK_TYPES and not classification['is_fund']
+        signal['next_net_return']=net_return(signal['next_return'],market) if known_stock and signal['next_return'] is not None else None
+        signal['break_even']=break_even(market) if known_stock else None
     return {'retail':retail,'model':model_recommendations(db,query,True)}
 
 

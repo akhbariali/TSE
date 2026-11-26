@@ -1,4 +1,4 @@
-"""Reproduce the supplied closing-price experiment and publish dated scores atomically.
+"""Use the supplied closing-price features with a fee-aware stock target.
 
 Run with .venv/bin/python scripts/model_recommendations.py after the market CSV export.
 The web server does not import the optional machine-learning dependencies.
@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+from trading_fees import BUY, SELL, STOCK_TYPES, TARGET_KIND, SOURCE, break_even
 
 ROOT=Path(__file__).resolve().parents[1]
 FEATURES=['retail_flow_turnover_ratio','retail_buy_value_share','retail_sell_value_share',
@@ -39,15 +40,21 @@ def build(source, output):
     import pandas as pd
     from sklearn.metrics import roc_auc_score, average_precision_score
     columns=['date','market','symbol','volume','turnover_rial','retail_flow_turnover_ratio',
-             'retail_buy_value_share','retail_sell_value_share','closing_price_rial','average_price_rial','is_fund','company']
+             'retail_buy_value_share','retail_sell_value_share','closing_price_rial','average_price_rial','is_fund','company','security_type']
     # Keep every market date for gap checks, but retain only eligible rows in
     # memory. The full CSV is larger than the production server's spare RAM.
-    parts=[];market_dates=set()
+    parts=[];market_dates=set();security_types={}
     for chunk in pd.read_csv(source,usecols=columns,chunksize=20000):
         market_dates.update(chunk.date.unique())
+        for market,symbol,kind in chunk[['market','symbol','security_type']].dropna().itertuples(index=False,name=None):
+            security_types[market+'|'+symbol]=int(kind)
         eligible=(chunk.closing_price_rial>0)&(chunk.average_price_rial>0)&(chunk.volume>0)&(chunk.turnover_rial>1e9)
         parts.append(chunk.loc[eligible].copy())
     raw=pd.concat(parts,ignore_index=True);del parts,chunk
+    raw['security_type']=(raw.market+'|'+raw.symbol).map(security_types)
+    # Stock fees are only valid for confirmed shares/rights. Historical labels
+    # without a known classification must not inherit a guessed fee schedule.
+    raw=raw[raw.security_type.isin(STOCK_TYPES)&~raw.is_fund.fillna(0).astype(bool)].copy()
     all_dates=sorted(market_dates);d=features(raw,all_dates);del raw
     labeled=d[d.next_return.notna()].copy();dates=sorted(labeled.date.unique())
     if len(dates)<10:raise ValueError('At least ten labeled sessions are needed')
@@ -58,7 +65,7 @@ def build(source, output):
         with sqlite3.connect(output) as db:
             previous=json.loads(db.execute('SELECT payload FROM metadata').fetchone()[0])
             cut1,cut2=previous['validation_start'],previous['test_start']
-    labeled['target']=(labeled.next_return>=.02).astype(int)
+    labeled['target']=(labeled.next_return>labeled.market.map({m:break_even(m) for m in BUY})).astype(int)
     # Purge labels crossing either boundary: even a next-session label must have
     # been observable before validation/test starts.
     train=labeled[(labeled.date<cut1)&(labeled.next_date<cut1)]
@@ -70,7 +77,9 @@ def build(source, output):
         callbacks=[lgb.early_stopping(20,verbose=False)])
     scored=d[d.date>=cut2].copy();scored['probability']=model.predict_proba(scored[FEATURES])[:,1]
     pred=model.predict_proba(test[FEATURES])[:,1]
-    metadata={'method':'Closing-price LightGBM · supplied experiment B','validation_start':cut1,
+    metadata={'method':'Closing-price LightGBM · positive after stock fees','target_kind':TARGET_KIND,
+        'fee_buy':BUY,'fee_sell':SELL,'fee_source':SOURCE,'fee_checked':'2026-11-25',
+        'break_even':{m:break_even(m) for m in BUY},'recommendation_limit':50,'validation_start':cut1,
         'test_start':cut2,'trained_through':str(train.date.max()),'validated_through':str(validation.date.max()),
         'data_through':all_dates[-1],'generated_at':datetime.now(timezone.utc).isoformat(),
         'train_rows':len(train),'validation_rows':len(validation),'test_rows':len(test),
