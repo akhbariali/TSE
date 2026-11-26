@@ -40,3 +40,5 @@
 .retail-key { color: #167a57; }
 .model-key { color: #8b48b5; }
 .signal-marker:focus { outline: 2px solid var(--blue); }
+
+.nav-editor{padding:22px}.nav-fields{display:flex;flex-wrap:wrap;gap:18px;margin:20px 0}.nav-fields .field{flex:1;min-width:190px}.nav-editor input:not([type=checkbox]),.nav-editor textarea{width:100%;box-sizing:border-box}.nav-editor td input:not([type=checkbox]){min-width:130px}.nav-editor .table-wrap{margin:18px 0}.nav-editor textarea{padding:10px;border:1px solid var(--line);border-radius:6px;font:inherit}.nav-save{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted)}.nav-value{font-size:23px}.nav-editor .fund-filter{white-space:normal}

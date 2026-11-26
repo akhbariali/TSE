@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import nav
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -448,11 +449,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.login_page()
             if route != '/static/style.css' and not self.require_login():
                 return
-            if route in ('/', '/index.html'):
+            if route in ('/', '/index.html', '/nav'):
                 return self.send((STATIC/'index.html').read_bytes(), content_type='text/html; charset=utf-8')
+            if route == '/api/nav':
+                return self.send(nav.load())
             if route.startswith('/static/'):
                 name = route.removeprefix('/static/')
-                allowed = {'app.js': 'text/javascript', 'style.css': 'text/css'}
+                allowed = {'nav.js': 'text/javascript', 'app.js': 'text/javascript', 'style.css': 'text/css'}
                 if name not in allowed:
                     return self.send({'error': 'File not found.'}, 404)
                 return self.send((STATIC/name).read_bytes(), content_type=allowed[name]+'; charset=utf-8')
@@ -533,6 +536,14 @@ class Handler(BaseHTTPRequestHandler):
             if not token:return self.login_page(429 if limited else 401,limited)
             return self.send('',303,headers={'Location':'/','Set-Cookie':self.session_cookie(token)})
         if not self.require_login():return
+        if endpoint == '/api/nav':
+            try:
+                size = int(self.headers.get('Content-Length', '0'))
+                if not 0 < size <= 524288 or self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+                    raise ValueError('Provide a JSON portfolio smaller than 512 KB.')
+                return self.send(nav.save(json.loads(self.rfile.read(size))))
+            except (ValueError, TypeError, KeyError, UnicodeDecodeError) as error:
+                return self.send({'error': str(error)}, 400)
         if endpoint=='/logout':
             AUTH.logout(self.session_token())
             return self.send('',303,headers={'Location':'/login','Set-Cookie':self.session_cookie('',True)})

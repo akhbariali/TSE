@@ -1,10 +1,12 @@
 """Authentication boundary checks for public pages and both market APIs."""
 import http.client
+import json
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import sys
 import threading
 import time
+import tempfile
 import unittest
 from unittest.mock import patch
 from urllib.parse import urlencode
@@ -36,6 +38,9 @@ class LoginTests(unittest.TestCase):
 
     def test_pages_apis_files_and_mutations_require_login(self):
         self.assertEqual(self.request('/')[0],303)
+        self.assertEqual(self.request('/nav')[0],303)
+        self.assertEqual(self.request('/api/nav')[0],401)
+        self.assertEqual(self.request('/api/nav','POST')[0],401)
         for path in ['/api/status','/api/ifb/status','/api/files/unknown','/api/ifb/files/unknown','/api/export/flows','/static/app.js']:
             self.assertIn(self.request(path)[0],(303,401))
         for path in ['/api/sync','/api/ifb/sync']:
@@ -70,6 +75,22 @@ class LoginTests(unittest.TestCase):
     def test_unconfigured_auth_fails_closed(self):
         with patch.object(app,'AUTH',None):
             self.assertEqual(self.request('/api/status')[0],503)
+
+    def test_private_nav_load_save_and_origin_boundary(self):
+        _, headers, _ = self.login()
+        request_headers = {'Cookie': headers['Set-Cookie'].split(';')[0], 'Content-Type': 'application/json'}
+        with tempfile.TemporaryDirectory() as folder, patch.object(app.nav, 'DB', Path(folder)/'nav.sqlite3'):
+            self.assertEqual(self.request('/nav', headers=request_headers)[0], 200)
+            self.assertEqual(self.request('/static/nav.js', headers=request_headers)[0], 200)
+            code, _, body = self.request('/api/nav', headers=request_headers)
+            self.assertEqual(code, 200)
+            data = json.loads(body)
+            payload = json.dumps({'revision': data['revision'], 'book': data['book']})
+            self.assertEqual(self.request('/api/nav', 'POST', payload, {**request_headers, 'Origin':'https://other.example'})[0], 403)
+            code, _, saved = self.request('/api/nav', 'POST', payload, request_headers)
+            self.assertEqual(code, 200)
+            self.assertEqual(json.loads(saved)['revision'], 1)
+            self.assertEqual(self.request('/api/nav', 'POST', payload, request_headers)[0], 400)
 
 
 if __name__=='__main__':unittest.main()
