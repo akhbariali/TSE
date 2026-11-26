@@ -40,8 +40,15 @@ def build(source, output):
     from sklearn.metrics import roc_auc_score, average_precision_score
     columns=['date','market','symbol','volume','turnover_rial','retail_flow_turnover_ratio',
              'retail_buy_value_share','retail_sell_value_share','closing_price_rial','average_price_rial','is_fund','company']
-    raw=pd.read_csv(source,usecols=columns,low_memory=False)
-    all_dates=sorted(raw.date.unique());d=features(raw,all_dates)
+    # Keep every market date for gap checks, but retain only eligible rows in
+    # memory. The full CSV is larger than the production server's spare RAM.
+    parts=[];market_dates=set()
+    for chunk in pd.read_csv(source,usecols=columns,chunksize=20000):
+        market_dates.update(chunk.date.unique())
+        eligible=(chunk.closing_price_rial>0)&(chunk.average_price_rial>0)&(chunk.volume>0)&(chunk.turnover_rial>1e9)
+        parts.append(chunk.loc[eligible].copy())
+    raw=pd.concat(parts,ignore_index=True);del parts,chunk
+    all_dates=sorted(market_dates);d=features(raw,all_dates);del raw
     labeled=d[d.next_return.notna()].copy();dates=sorted(labeled.date.unique())
     if len(dates)<10:raise ValueError('At least ten labeled sessions are needed')
     cut1,cut2=dates[int(len(dates)*.5)],dates[int(len(dates)*.7)]
